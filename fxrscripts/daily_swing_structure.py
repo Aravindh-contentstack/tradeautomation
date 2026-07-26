@@ -76,6 +76,19 @@ let prevManualInput = false;
 let prevHoldInput = false;
 let lastSeenTime = null;
 
+// Market structure (bullish/bearish), ported from
+// swing_structure/market_structure.py (compute_market_structure). Python
+// stays the source of truth for this too, same as the swing high/low
+// logic above: fix there first, then re-port.
+//
+// Rule: structure starts undetermined (null) and flips ONLY on a genuine
+// break (a real close beyond the level, the same "else if (closeToday >
+// swingHigh)" / "else if (closeToday < swingLow)" branches below already
+// use to redraw a level). A manual restart, a hold release, or a timeout
+// redraw moves a level without a real price break, so none of those may
+// flip marketStructure, only the two real-break branches may.
+let marketStructure = null;
+
 //@version=1
 
 init = () => {
@@ -155,6 +168,11 @@ onTick = (length, _moment, _, ta, inputs) => {
       holdEffective = false;
     }
 
+    // Market structure only cares about a genuine break, so track that
+    // separately from the redraw logic below, reset fresh each tick.
+    let highBrokeReal = false;
+    let lowBrokeReal = false;
+
     // ---- High side: its own clock, independent of the low side. ----
     if (manualTriggered) {
       // Step 2: manual restart wins outright.
@@ -166,6 +184,7 @@ onTick = (length, _moment, _, ta, inputs) => {
       swingHigh = windowHigh;
       swingHighPivotTime = time(highOffset);
       highClock = 0;
+      highBrokeReal = true;
     } else if (holdReleased) {
       // Step 4: hold_timeout just switched back off. Fresh grace period.
       highClock = 0;
@@ -191,6 +210,7 @@ onTick = (length, _moment, _, ta, inputs) => {
       swingLow = windowLow;
       swingLowPivotTime = time(lowOffset);
       lowClock = 0;
+      lowBrokeReal = true;
     } else if (holdReleased) {
       lowClock = 0;
     } else {
@@ -203,6 +223,15 @@ onTick = (length, _moment, _, ta, inputs) => {
         lowClock = tentativeLowClock;
       }
     }
+
+    // A close can't be both above swingHigh and below swingLow at once
+    // (swingHigh always stays above swingLow once seeded), so these are
+    // mutually exclusive in practice, same as in market_structure.py.
+    if (highBrokeReal) {
+      marketStructure = 'bullish';
+    } else if (lowBrokeReal) {
+      marketStructure = 'bearish';
+    }
   }
 
   // Redrawn every tick, not just on a redraw branch. deleteDrawingByCondition
@@ -212,8 +241,9 @@ onTick = (length, _moment, _, ta, inputs) => {
   // tracking. Both rays are deleted and both recreated every tick, since
   // matching shapeType alone can't tell the red one from the green one.
   deleteDrawingByCondition((drawing) => drawing.shapeType === 'horizontal_ray');
-  horizontalRay(swingHighPivotTime, swingHigh, { linecolor: color.red, linewidth: 1, showLabel: true }, 'HH');
-  horizontalRay(swingLowPivotTime, swingLow, { linecolor: color.green, linewidth: 1, showLabel: true }, 'LL');
+  const structureLabel = marketStructure ? marketStructure.toUpperCase() : 'UNDETERMINED';
+  horizontalRay(swingHighPivotTime, swingHigh, { linecolor: color.red, linewidth: 1, showLabel: true }, `HH (${structureLabel})`);
+  horizontalRay(swingLowPivotTime, swingLow, { linecolor: color.green, linewidth: 1, showLabel: true }, `LL (${structureLabel})`);
 
   prevManualInput = manualRaw;
   prevHoldInput = holdEffective;

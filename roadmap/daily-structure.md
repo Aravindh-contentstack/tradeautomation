@@ -18,7 +18,7 @@ July 25 2026
 
 July 26 2026
 
-- With the market_structure we need to identify whether the swing is bullish or bearish.  
+- ~~With the market_structure we need to identify whether the swing is bullish or bearish.~~
 - Implement the internal daily
 
 
