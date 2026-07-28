@@ -19,11 +19,24 @@ July 25 2026
 July 26 2026
 
 - ~~With the market_structure we need to identify whether the swing is bullish or bearish.~~
-- Implement the internal daily
+- ~~Implement the internal daily structure.~~
+
+Next Items:
+
+- Find out the internal structure (bullish or bearish) based on the structure mapping
+- Implement fractal structure mapping
+- Identify the fractal structure based on the mapping
+- Implement the market structure in 4H
+- Implement the market structure in h1
+- Enhancements:
+  - Find out whether we can incorporate pivot based market structure for swing and internal for better accuracy
+  - Some of the intenral structure are not very small and when the price moves from bearish internal to bullish or vice versa the script is not able to identify it.
+  - ~~Improve adaptive look_back period using ATR~~
 
 
 
 ### Later Items
 
+- Implement pivot based ATR rule for daily_swing similar to daily internal/
 - Understand the python code for market_structure thoroughly line by line
 
