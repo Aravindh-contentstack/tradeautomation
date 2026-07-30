@@ -1,5 +1,13 @@
 """Daily ATR-based zigzag pivot detector, for the internal tier.
 
+SUPERSEDED July 29 2026: this mechanism is no longer part of the live
+Daily chain. swing_structure/daily_structure.py's compute_daily_structures
+now covers the Daily internal tier the same way it covers the swing and
+fractal tiers, all three via a Williams Fractal at a different n (see
+roadmap/detection-method-decision.md's "Daily port" section for why). This
+module is kept, unused, rather than deleted, as a comparison/rollback
+reference until nobody needs the old mechanism.
+
 Sibling to swing_structure/detector.py's compute_daily_swing_structure
 (same shape: takes an OHLC DataFrame, returns swing_high, swing_low,
 high_event, low_event), but powered by a third mechanism (this file's
@@ -40,6 +48,8 @@ previous ATR with today's True Range, weighted 1/atr_period.
 """
 
 import pandas as pd
+
+from swing_structure.atr import compute_atr_series
 
 
 def compute_pivot_swing_structure(df, atr_period=14, reversal_multiplier=1.5, manual_restart=None):
@@ -84,10 +94,16 @@ def compute_pivot_swing_structure(df, atr_period=14, reversal_multiplier=1.5, ma
     high_event_col = [None] * n
     low_event_col = [None] * n
 
-    # State carried from one candle to the next as we walk forward.
-    atr = None
-    tr_values = []  # only accumulated until atr_period is reached
+    # Wilder's ATR, previously accumulated inline in the loop below. It
+    # now comes from swing_structure/atr.py, so the fractal detector's
+    # optional significance filter measures against exactly the same
+    # numbers instead of a second hand-rolled copy that could drift.
+    # Precomputing is not a lookahead: ATR at candle i depends only on
+    # candles up to i, so atr_series[i] holds precisely the value the old
+    # inline accumulator held on candle i, None during warm-up included.
+    atr_series = compute_atr_series(df, atr_period=atr_period)
 
+    # State carried from one candle to the next as we walk forward.
     direction = None  # None (bootstrap), "up", or "down"
     running_extreme = None
     running_extreme_index = None
@@ -114,22 +130,7 @@ def compute_pivot_swing_structure(df, atr_period=14, reversal_multiplier=1.5, ma
         manual_prev = bool(manual_restart.iloc[i - 1]) if i > 0 else False
         manual_triggered = manual_today and not manual_prev
 
-        # True Range and Wilder's ATR, updated one candle at a time.
-        if i == 0:
-            true_range = high_today - low_today
-        else:
-            prev_close = df["close"].iloc[i - 1]
-            true_range = max(
-                high_today - low_today,
-                abs(high_today - prev_close),
-                abs(low_today - prev_close),
-            )
-        if atr is None:
-            tr_values.append(true_range)
-            if len(tr_values) == atr_period:
-                atr = sum(tr_values) / atr_period
-        else:
-            atr = (atr * (atr_period - 1) + true_range) / atr_period
+        atr = atr_series[i]
 
         if manual_triggered:
             # Deliberate override: forget whatever was in progress and

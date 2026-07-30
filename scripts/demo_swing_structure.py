@@ -3,6 +3,12 @@ rule in the Daily Swing Structure Detector at least once, runs the
 detector, and prints a readable table so correctness can be checked by eye
 before any Pine porting starts.
 
+NOTE July 29 2026: demonstrates the retired lookback+timeout mechanism
+(swing_structure/detector.py), superseded as the live Daily swing tier by
+scripts/demo_daily_structure.py. build_synthetic_data() below is still
+reused by several other demo scripts, so this file itself is not retired,
+only the mechanism it was originally written to exercise.
+
 See ethereal-coalescing-flute.md for the confirmed rules this exercises:
 cold start / initial seed, a break of the swing high, a break of the swing
 low, a naked 65-candle automatic timeout on both sides at once, a run where

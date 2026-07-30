@@ -2,6 +2,13 @@
 dataset demo_swing_structure.py uses, and prints a readable table so
 correctness can be checked by eye before any Pine porting starts.
 
+NOTE July 29 2026: demonstrates compute_market_structure layered on the
+retired lookback+timeout swing tier (swing_structure/detector.py), a
+combination superseded as the live Daily swing tier by
+scripts/demo_daily_structure.py. compute_market_structure itself is still
+fully active, it's what compute_tier_structure calls internally for
+every Daily/4H/H1 tier now.
+
 The synthetic data already has a break of the swing high, then a break of
 the swing low, then a 65-candle timeout stretch, then a manual_restart
 flip (see demo_swing_structure.py for how each segment is built). That's

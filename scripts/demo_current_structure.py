@@ -1,7 +1,13 @@
-"""Runs the full daily structure chain (swing then internal) on the same
+"""Runs the full Daily structure chain (all three tiers) on the same
 synthetic dataset the other demo scripts use, then prints what
 get_current_structure returns, so it's obvious by eye that it matches
 the last row of the combined table.
+
+Rebuilt July 29 2026 to call compute_daily_structures (the live wiring
+current_structure.py's _STRUCTURE_COLUMNS now points at) instead of the
+old compute_daily_swing_structure -> compute_market_structure ->
+compute_internal_structure chain, so this demo exercises the real,
+current wiring rather than a chain current_structure.py no longer reads.
 """
 
 import sys
@@ -11,25 +17,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from demo_swing_structure import build_synthetic_data
-from swing_structure.detector import compute_daily_swing_structure
-from swing_structure.market_structure import compute_market_structure
-from swing_structure.internal_structure import compute_internal_structure
 from swing_structure.current_structure import get_current_structure
+from swing_structure.daily_structure import compute_daily_structures
 
 
 def main():
-    df, manual_restart, hold_timeout = build_synthetic_data()
+    df, manual_restart, _hold_timeout = build_synthetic_data()
 
-    result = compute_daily_swing_structure(
-        df,
-        manual_restart=manual_restart,
-        hold_timeout=hold_timeout,
+    result = compute_daily_structures(
+        df, manual_restarts={"daily_swing": manual_restart}
     )
-    result = compute_market_structure(result)
-    result = compute_internal_structure(result)
 
     print("Last row of the combined table:")
-    print(result[["date", "market_structure", "internal_structure"]].iloc[-1].to_string())
+    print(
+        result[
+            ["date", "daily_swing_structure", "daily_internal_structure", "daily_fractal_structure"]
+        ]
+        .iloc[-1]
+        .to_string()
+    )
 
     print("\nget_current_structure(result):")
     print(get_current_structure(result))

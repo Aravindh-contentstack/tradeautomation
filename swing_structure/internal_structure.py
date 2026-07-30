@@ -2,6 +2,14 @@
 with the same bullish/bearish classification already used by the swing
 tier.
 
+SUPERSEDED July 29 2026: this mechanism is no longer part of the live
+Daily chain. swing_structure/daily_structure.py's compute_daily_structures
+now covers the Daily internal tier the same way it covers the swing and
+fractal tiers, all three via a Williams Fractal at a different n (see
+roadmap/detection-method-decision.md's "Daily port" section for why). This
+module is kept, unused, rather than deleted, as a comparison/rollback
+reference until nobody needs the old mechanism.
+
 "Internal" and "swing" (also called "external") are not two different
 concepts, they're the same idea (the current, most relevant swing high
 and swing low, and which side was most recently broken) applied at two

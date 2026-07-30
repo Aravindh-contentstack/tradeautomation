@@ -1,4 +1,82 @@
-# Daily Swing Structure (FXR Script)
+# Market Structure (FXR Script)
+
+Nine structure indicators, three per timeframe:
+
+| Script | Timeframe | Mechanism | linewidth |
+|---|---|---|---|
+| [`daily_swing_structure.py`](daily_swing_structure.py) | Daily | Williams Fractal, n=20 | 9 |
+| [`daily_internal_structure.py`](daily_internal_structure.py) | Daily | Williams Fractal, n=8 | 8 |
+| [`daily_fractal_structure.py`](daily_fractal_structure.py) | Daily | Williams Fractal, n=2 | 1 |
+| [`h4_fractal_structure.py`](h4_fractal_structure.py) | 4H | Williams Fractal, n=2 | 2 |
+| [`h4_internal_structure.py`](h4_internal_structure.py) | 4H | Williams Fractal, n=8 | 3 |
+| [`h4_swing_structure.py`](h4_swing_structure.py) | 4H | Williams Fractal, n=20 | 4 |
+| [`h1_fractal_structure.py`](h1_fractal_structure.py) | H1 | Williams Fractal, n=2 | 5 |
+| [`h1_internal_structure.py`](h1_internal_structure.py) | H1 | Williams Fractal, n=8 | 6 |
+| [`h1_swing_structure.py`](h1_swing_structure.py) | H1 | Williams Fractal, n=20 | 7 |
+
+**Updated July 29 2026**: Daily used to run three different mechanisms (a lookback window plus timeout, an ATR zigzag, and a Williams Fractal at n=2), one per tier, while 4H ran one mechanism at three scales. Daily has now been ported to the same one-mechanism-three-scales approach as 4H, ahead of the originally planned H1-first order. See [`../roadmap/detection-method-decision.md`](../roadmap/detection-method-decision.md)'s "Daily port" section for the full reasoning, including the caveat that Daily's n=8 (internal tier) has never been checked against real Daily bars.
+
+**Also added July 29 2026**: H1 now has its own trio (`h1_fractal_structure.py`, `h1_internal_structure.py`, `h1_swing_structure.py`), carrying over n=2/8/20 unchanged from the 4H trio as a placeholder. See the decision doc's "For the H1 port" section: none of these three numbers have been checked against real H1 bars, and H1's trend-to-noise ratio is expected to differ from 4H's, which is the one thing Williams Fractal is genuinely sensitive to.
+
+Why the tiers stay fully independent of each other despite sharing one mechanism is also in that same decision doc. Read it before changing any of the nine.
+
+[`timeframe_probe.py`](timeframe_probe.py) is a throwaway spike, not an indicator. See "Timeframe isolation" below.
+
+## Premium/discount
+
+Two more scripts, [`h4_swing_premium_discount.py`](h4_swing_premium_discount.py) and [`h4_internal_premium_discount.py`](h4_internal_premium_discount.py), each a full duplicate of the matching structure script's fractal-detection engine (`h4_swing_structure.py`'s n=20, `h4_internal_structure.py`'s n=8) with a zone-drawing block appended. They visualize `swing_structure/premium_discount.py`'s rule: a shaded rectangle over the tier's current swing range, red-tinted and labeled "PREMIUM" above the equilibrium price in a bullish range (green/"DISCOUNT" below), flipped for a bearish range, plus a thin "EQ" line at the equilibrium price itself.
+
+Unlike the nine structure scripts' trendLines, which draw once at a genuine cross and are never touched again, the zone box and EQ line are redrawn every closed candle (`deleteDrawingByCondition` then redraw), since the zone can flip candle to candle as price wiggles around equilibrium. They don't use the `linewidth`-tag convention the trendLines share, since `rectangle`/`horizontalLine` don't carry a `linewidth` field the same way: instead each script reserves its own `ZONE_TAG_COLOR` (`h4_swing_premium_discount.py` orange, `h4_internal_premium_discount.py` cyan), matched via `opts['color']`/`opts['linecolor']`, so neither script's cleanup can touch the other's box or line, or any trendLine drawn by the structure scripts.
+
+There is no existing TradingView reference indicator for premium/discount the way there is for swing/internal/fractal structure, so these two scripts are themselves the visual verification method: load one in fxreplay, and check the box's premium/discount label and color against the equilibrium line and the tier's current direction by eye.
+
+**`h4_swing_premium_discount.py` recalibrates as the trend runs.** The tier's raw `swing_high`/`swing_low` are Williams Fractal pivots that only update once fully confirmed (`periods` candles beyond it with no reversal), and `h4_swing_structure.py`'s own docstring already documents that this makes the tier "go quiet in a strong one-directional trend": once a side breaks and price keeps running, that pivot freezes at the already-broken level. Using it directly would freeze the box and equilibrium right along with it instead of recalibrating as the trend extends. The fix (`swing_structure/current_range.py`'s `compute_current_range`, ported into this script as `h4SwingRunningMaxHigh`/`h4SwingRunningMinLow`) extends whichever side is stale with the running high (or low) actually made since that side's pivot last changed, while the side that hasn't been broken keeps reading its own pivot live, unaffected. `h4_internal_premium_discount.py` does not have this fix yet, it still reads its raw pivots directly, scheduled for later.
+
+**Found while wiring this up**: the docs' quick example shows `horizontalLine(time, price, styles, text)`, but the editor's own type-checker rejects that shape. Three successive errors triangulated the real signature. `horizontalLine(time, price, styles, text)` (4 args) errored "Expected 1-3 arguments" (no leading `time` argument exists at all, since a horizontal line spans the whole chart width rather than starting at a point the way `horizontalRay` does). `horizontalLine(price, wrongPrice, styles)` (putting a second number in position 2) errored "Type 'number' has no properties in common with type 'HorzlineLineToolOverrides'" (position 2 is the styles object, not a second price). `horizontalLine(price, { ...styles, text: 'EQ' })` errored "'text' does not exist in type 'HorzlineLineToolOverrides'" (that type carries no text field). The real shape is `horizontalLine(price, styles?, text?)`, the label as its own 3rd positional argument: `horizontalLine(equilibrium, { linecolor, linewidth }, 'EQ')`. Same class of docs-vs-editor mismatch as the `linecolor`/`band.line` findings above, worth remembering for any future line-tool call in this API.
+
+## Timeframe isolation
+
+The requirement: 4H markings must not appear on a Daily chart, and Daily markings must not appear on a 4H chart.
+
+**FXR Script cannot read the chart's current timeframe.** Confirmed against the live docs MCP server. There is no `timeframe`, `period`, `resolution` or `syminfo` global. `indicator()` accepts only `onMainPanel`, `format` and `precision`. `input.timeframe` reports what the *user picked* in a dropdown, not what the chart is on. And `mtf.*` (BETA) reads *other* timeframes but cannot report the chart's own. So the timeframe has to be inferred.
+
+**The inference rule: the MINIMUM positive `time(i) - time(i+1)` over the last 20 bars.** Not the median, and not simply `time(0) - time(1)`. Session and weekend gaps only ever make a delta *larger*, never smaller, so the minimum is the true bar interval and is gap-proof by construction. This matters most on Daily forex, where the Friday-to-Monday delta is three days, but plenty of midweek deltas are exactly one day, so the minimum still lands on 86400000. Compare against `MY_TIMEFRAME_MS`: 86400000 for Daily, 14400000 for 4H, 3600000 for H1.
+
+Three things the guard does, in order, and the reason for each:
+
+1. **Bail out while fewer than 5 usable deltas exist**, without touching the stored spacing. A warming-up bar must not look like a timeframe change.
+2. **On a mismatch, draw nothing and clean up.** This is what enforces the requirement.
+3. **On arriving from another timeframe, reset every top-level `let`.** Without this, Daily to 4H to Daily resumes the state machine on top of state accumulated from the other timeframe's bars.
+
+**The guard must sit before the `time(0) === lastSeenTime` new-bar gate, not after.** A wrong-timeframe bar that consumed the new-bar gate would desynchronise it, so the state machine would skip that bar when the user switched back.
+
+### Self-only drawing cleanup, and why every script has a distinct linewidth
+
+`deleteDrawingByCondition` can only inspect `StoredShape`, which is `{ chartPoints, overrideOptions, shapeType }`. Matching on `shapeType` alone would delete *every* `trendLine` on the chart, including a sibling tier's. So each script tags its drawings with a unique `linewidth` (Daily tiers 1, 8 and 9, 4H tiers 2, 3 and 4, H1 tiers 5, 6 and 7) and deletes only its own.
+
+Reading that tag back needs **bracket access**, `drawing.overrideOptions['linewidth']`, not dotted access. Dotted access is a type error, for the same reason `linecolor` was abandoned in Design 3 below: `overrideOptions` is the `DrawingOverrides` union across every drawing tool, so a given field exists on only some members. **If the editor rejects the bracket form too, the fallback is to give a script a different `shapeType` from its siblings** (`rayLine` instead of `trendLine`) and match on `shapeType` after all.
+
+**Retired July 29 2026**: `daily_swing_structure.py` used to be the one exception here, since it drew horizontal rays rather than trendLines and so was matched by `shapeType === 'horizontal_ray'` instead of by linewidth. That exception no longer applies: as part of the Daily port to the fractal-family mechanism (see the table above), `daily_swing_structure.py` now draws trendLines like every other tier, and needs its own linewidth tag (9) the same way. Until that port, this was also a latent hazard worth naming: `daily_internal_structure.py` and `daily_fractal_structure.py` already shared linewidth 1, which meant either one's timeframe-mismatch cleanup could delete the other's lines. Fixed at the same time by moving `daily_internal_structure.py` to linewidth 8.
+
+### Three unknowns the probe answers
+
+`timeframe_probe.py` exists because guessing wrong on any of these means rewriting all nine scripts. Load it alone, switch the chart between Daily and 4H, and read the labels on the drawn segments.
+
+1. **On a timeframe change, are the previous timeframe's script-drawn drawings cleared automatically, or left behind?** The most important one. If fxreplay clears them, the gate alone achieves full isolation and `TF_CLEANUP_ON_MISMATCH` can be set to `false` in all nine scripts. Read it by switching Daily to 4H and checking whether the `TF=1D` segments are still there.
+2. **Does top-level `let` state survive a timeframe change?** Read `ticks` in the label: if it keeps climbing across a switch rather than restarting near 0, state survives, and the reset in step 3 above is required. A label reading `TF=4h prevTF=1D` is direct proof.
+3. **Does `overrideOptions['linewidth']` read without a type error?** Read `lwProbe` in the label. `ok:<n>` means it worked, `undef` means it read without erroring but the field was absent. A compile error or throw means the fallback above is needed.
+
+**Findings: not yet recorded.** Run the probe in fxreplay and write the three answers here. The nine scripts currently ship with `TF_CLEANUP_ON_MISMATCH = true`, which is the safe assumption (it does harmless extra work if drawings turn out to be auto-cleared).
+
+## Keeping the nine scripts in sync
+
+FXR Script has no import or module mechanism, so the timeframe guard block is **duplicated verbatim** in all nine scripts, bar the two per-script constants. A change to it has to be applied nine times by hand. Each script's copy carries a comment listing the other eight.
+
+The three scripts within each timeframe are otherwise a one-line diff from each other: default `periods`, state-variable prefix, and linewidth. Prefer regenerating them from one another over hand-editing each.
+
+## Original notes: Daily Swing Structure
+
+**Superseded July 29 2026**: everything below in this section, and the Design 1/2/3 history right after it, describes `daily_swing_structure.py`'s OLD mechanism (a lookback window plus timeout, powered by `swing_structure/detector.py`) and its OLD visual design (a pair of horizontal rays, redrawn every tick). Neither is current: the script now runs a Williams Fractal at n=20 with a cross-then-redraw trendLine visual, matching its 4H sibling `h4_swing_structure.py`. Kept here as design history rather than deleted, since the reasoning that ruled out Designs 1 and 2 (and the docs-MCP-server findings and open questions further down this file) remains accurate and relevant to any future FXR Script drawing work, not specific to the retired mechanism.
 
 FXR Script port of [`swing_structure/detector.py`](../swing_structure/detector.py), written for fxreplay.com. fxreplay does not run Pine Script. It has its own language, FXR Script, which is why [`../pinescripts/daily_swing_structure.py`](../pinescripts/daily_swing_structure.py) cannot simply be pasted in there. That Pine file stays as the working TradingView version, untouched. Python (`detector.py`) remains the source of truth for the rules. If this file ever disagrees with the Python for the same candles, fix `detector.py` first, then re-port.
 

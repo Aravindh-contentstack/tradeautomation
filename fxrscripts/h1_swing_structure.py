@@ -1,21 +1,16 @@
-// FXR Script port of the Daily SWING tier (n=20, the major-swing tier).
+// FXR Script port of the H1 SWING tier (n=20, the major-swing tier).
 //
-// REPLACES this script's previous mechanism (a trailing lookback window
-// plus a 65-candle timeout clock per side, powered by
-// swing_structure/detector.py's compute_daily_swing_structure), and its
-// previous visual design (a pair of horizontalRays, redrawn every tick via
-// deleteDrawingByCondition). As of July 29 2026, Daily's swing tier runs
-// the same Williams Fractal mechanism as the internal and fractal tiers,
-// mirroring the 4H set: see roadmap/detection-method-decision.md's "Daily
-// port" section for the full reasoning, and swing_structure/detector.py's
-// own module docstring, now marked SUPERSEDED, for the retired
-// mechanism's history and the horizontalRay design's own history
-// (Design 1/2/3, see fxrscripts/README.md).
-//
-// n=20 is the strongest-backed number in this whole port: it is the
-// ORIGINAL value the user found, on TradingView, to map Daily swing
-// structure cleanly. It was used on 4H first (h4_swing_structure.py), and
-// now finally lands on the timeframe it was actually observed on.
+// This tier REPLACES the lookback-plus-timeout mechanism the Daily swing
+// tier uses, the same way the 4H swing tier does. n=20 is carried over
+// unchanged from the 4H trio's own swing tier, where it came from the
+// user's own finding that a Williams period near 20 mapped swing
+// structure cleanly in TradingView. That finding has NOT been repeated on
+// H1: roadmap/detection-method-decision.md's "For the H1 port" section
+// explicitly warns not to assume it transfers, since Williams Fractal is
+// sensitive to the trend-to-noise ratio of the path, and H1's ratio is
+// expected to differ from 4H's. Treat n=20 here as a provisional
+// placeholder pending the user's own three-regime calibration on real H1
+// charts, not as a validated H1 number.
 //
 // A fractal at large n is a swing detector, and a better-behaved one than
 // a trailing window: the pivot must be the extreme of a window CENTRED on
@@ -25,28 +20,28 @@
 // Expect this tier to go QUIET in a strong one-directional trend. Large-n
 // up-fractals become rare there, because each candidate high is exceeded
 // before 20 candles pass on its future side, so the level sits well below
-// price with no new confirmation. That is the honest answer (no swing
-// high has confirmed yet) rather than a fault, and it is exactly the
-// situation the old Daily timeout was invented to paper over.
+// price with no new confirmation. That is the honest answer (no swing high
+// has confirmed yet) rather than a fault, and it is exactly the situation
+// the Daily timeout was invented to paper over.
 //
 // Python is the source of truth: swing_structure/fractal_detector.py's
 // compute_fractal_swing_structure, driven by
-// swing_structure/daily_structure.py's DAILY_TIER_PERIODS. If this ever
+// swing_structure/h1_structure.py's H1_TIER_PERIODS. If this ever
 // disagrees with the Python for the same candles, fix the Python first,
 // then re-port.
 //
 // This is one of three sibling scripts that differ ONLY in their default
 // `periods`, their state-variable prefix, and their line width:
 //
-//     daily_fractal_structure.py    n=2    linewidth 1   minor pulls
-//     daily_internal_structure.py   n=8    linewidth 8   intermediate legs
-//     daily_swing_structure.py      n=20   linewidth 9   major Daily legs
+//     h1_fractal_structure.py    n=2    linewidth 5   minor pulls
+//     h1_internal_structure.py   n=8    linewidth 6   intermediate legs
+//     h1_swing_structure.py      n=20   linewidth 7   major H1 legs
 //
 // All three run the SAME mechanism (Williams Fractal) at three scales,
-// same as the 4H set. Two reasons, both recorded in
-// roadmap/detection-method-decision.md:
+// unlike the Daily set where each tier uses a different mechanism. Two
+// reasons, both recorded in roadmap/detection-method-decision.md:
 //
-//   1. The old lookback tier's timeout redrew its level purely because a
+//   1. The Daily swing tier's timeout redraws its level purely because a
 //      counter reached 65, with no market event behind it. Since the whole
 //      point of three tiers is reading them against each other (swing
 //      bullish while internal is bearish is the swing pullback phase), a
@@ -72,15 +67,8 @@
 // SOLID WHITE for both sides, to stand out as the major-swing level. The
 // drawn linewidth stays MY_LINEWIDTH (visually thicker than it looks
 // cosmetically different) rather than a distinct value, because linewidth
-// doubles as this script's self-only deletion tag (see below) — changing
+// doubles as this script's self-only deletion tag (see below), changing
 // the drawn width would collide with another tier's tag.
-//
-// Linewidth note: this script's old horizontalRay visual was matched by
-// shapeType, not linewidth, so it never collided with anything. Switching
-// to trendLine (this rewrite) removes that accidental safety, so it now
-// needs its own distinct linewidth like every other tier: 9, clear of
-// daily_internal's 8, daily_fractal's 1, the 4H set's 2/3/4, and the H1
-// set's 5/6/7.
 
 const FRACTAL_TIE_TOLERANCE = 4;
 
@@ -102,8 +90,8 @@ const FRACTAL_TIE_TOLERANCE = 4;
 // on its own timeframe.
 // ---------------------------------------------------------------------
 
-const MY_TIMEFRAME_MS = 86400000;   // Daily. 14400000 in the 4H scripts.
-const MY_LINEWIDTH = 9;             // Also this script's deletion tag, see below.
+const MY_TIMEFRAME_MS = 3600000;    // H1. 86400000 in the daily scripts, 14400000 in the 4H scripts.
+const MY_LINEWIDTH = 7;             // Also this script's deletion tag, see below.
 const TF_PROBE_BARS = 20;
 const TF_MIN_VALID_BARS = 5;
 
@@ -113,42 +101,42 @@ const TF_MIN_VALID_BARS = 5;
 // changes, this is unnecessary work and can be set to false.
 const TF_CLEANUP_ON_MISMATCH = true;
 
-let dailySwingSwingHigh = NaN;
-let dailySwingSwingHighTime = null;
-let dailySwingHighCrossed = false;
-let dailySwingSwingLow = NaN;
-let dailySwingSwingLowTime = null;
-let dailySwingLowCrossed = false;
+let h1SwingSwingHigh = NaN;
+let h1SwingSwingHighTime = null;
+let h1SwingHighCrossed = false;
+let h1SwingSwingLow = NaN;
+let h1SwingSwingLowTime = null;
+let h1SwingLowCrossed = false;
 
-let dailySwingPrevManualInput = false;
-let dailySwingLastRestartTime = null;
-let dailySwingLastSeenTime = null;
+let h1SwingPrevManualInput = false;
+let h1SwingLastRestartTime = null;
+let h1SwingLastSeenTime = null;
 
 // Wilder's ATR, only accumulated when the significance filter is switched
 // on. Mirrors swing_structure/atr.py.
-let dailySwingAtr = NaN;
-let dailySwingTrSum = 0;
-let dailySwingTrCount = 0;
+let h1SwingAtr = NaN;
+let h1SwingTrSum = 0;
+let h1SwingTrCount = 0;
 
 // Last inferred bar spacing, so a timeframe change can be detected and
 // state reset rather than resumed on top of the other timeframe's bars.
-let dailySwingLastSpacing = null;
+let h1SwingLastSpacing = null;
 
 // Bullish/bearish structure for this tier, same rule as
 // swing_structure/market_structure.py: starts undetermined (null), and
 // flips ONLY on a genuine cross, never on a manual restart or a silent
 // reversal confirmation.
-let dailySwingStructure = null;
+let h1SwingStructure = null;
 
 //@version=1
 
 init = () => {
   indicator({ onMainPanel: true, format: 'inherit' });
 
-  // Range goes to 100, not the older script's 10: the sibling swing tier
+  // Range goes to 100, not the Daily script's 10: the sibling swing tier
   // needs n=20, and keeping one shared range across all three scripts
   // means they stay a one-line diff from each other.
-  input.int('Daily Swing Periods', 20, 'periods', 2, 100, 1, 'Candles required strictly beyond the pivot, on the frontier closer to now, to confirm a fractal. This is the tier\'s scale: 2 is minor pulls, 20 is major legs.', 'Daily Swing Structure Settings');
+  input.int('H1 Swing Periods', 20, 'periods', 2, 100, 1, 'Candles required strictly beyond the pivot, on the frontier closer to now, to confirm a fractal. This is the tier\'s scale: 2 is minor pulls, 20 is major legs.', 'H1 Swing Structure Settings');
 
   // OFF by default (0). Rejects a newly confirmed pivot unless its
   // distance from the last confirmed pivot on the OPPOSITE side is at
@@ -160,10 +148,10 @@ init = () => {
   // monotonic dial. The opposite-side pivot it measures against is itself
   // filtered, so a larger threshold can re-admit pivots that a smaller one
   // rejected. Expect to search values rather than turn it one way.
-  input.float('Daily Swing ATR Separation', 0, 'minAtrSeparation', 0, 5, 0.25, 'Minimum leg size against the last opposite pivot, in ATRs. 0 disables the filter entirely.', 'Daily Swing Structure Settings');
-  input.int('Daily Swing ATR Period', 14, 'atrPeriod', 2, 200, 1, 'How many True Range values feed Wilder\'s ATR. Ignored while ATR Separation is 0.', 'Daily Swing Structure Settings');
+  input.float('H1 Swing ATR Separation', 0, 'minAtrSeparation', 0, 5, 0.25, 'Minimum leg size against the last opposite pivot, in ATRs. 0 disables the filter entirely.', 'H1 Swing Structure Settings');
+  input.int('H1 Swing ATR Period', 14, 'atrPeriod', 2, 200, 1, 'How many True Range values feed Wilder\'s ATR. Ignored while ATR Separation is 0.', 'H1 Swing Structure Settings');
 
-  input.bool('Daily Swing Manual Restart Now', false, 'manualRestartInput');
+  input.bool('H1 Swing Manual Restart Now', false, 'manualRestartInput');
 };
 
 // True if all `periods` candles between the candidate pivot (periods bars
@@ -173,7 +161,7 @@ init = () => {
 // Note these helpers read only their arguments, never top-level state.
 // That is deliberate: a helper declared alongside onTick cannot see
 // top-level `let` variables (fxrscripts/README.md, resolved question 4).
-const dailySwingNearFrontierStrict = (periods, pivotValue, higher, getValue) => {
+const h1SwingNearFrontierStrict = (periods, pivotValue, higher, getValue) => {
   for (let t = 1; t <= periods; t++) {
     const v = getValue(periods - t);
     if (Number.isNaN(v)) return false;
@@ -194,7 +182,7 @@ const dailySwingNearFrontierStrict = (periods, pivotValue, higher, getValue) => 
 // (fxrscripts/README.md, resolved question 4, confirmed the hard way when
 // this exact pattern threw "FRACTAL_TIE_TOLERANCE is not defined" at
 // runtime despite the constant being declared earlier in the same file).
-const dailySwingFarFrontierTolerant = (periods, pivotValue, higher, getValue, tieTolerance) => {
+const h1SwingFarFrontierTolerant = (periods, pivotValue, higher, getValue, tieTolerance) => {
   for (let k = 0; k <= tieTolerance; k++) {
     let tieRunOk = true;
     for (let t = 1; t <= k; t++) {
@@ -252,65 +240,65 @@ onTick = (length, _moment, _, ta, inputs) => {
 
   if (inferredSpacing === null) {
     // Not enough history to decide. Draw nothing, and deliberately do not
-    // touch dailySwingLastSpacing, so a warming-up candle never looks like
+    // touch h1SwingLastSpacing, so a warming-up candle never looks like
     // a timeframe change.
     return;
   }
 
   if (inferredSpacing !== MY_TIMEFRAME_MS) {
-    // Not our chart. This is what keeps Daily markings off the 4H chart.
+    // Not our chart. This is what keeps H1 markings off other timeframes.
     if (TF_CLEANUP_ON_MISMATCH) {
       // Deletes only THIS script's drawings, matched on linewidth. Every
-      // script uses a distinct width (daily tiers 1/8/9, 4H tiers 2/3/4,
-      // H1 tiers 5/6/7), so this cannot remove a sibling's lines. Matching
-      // on shapeType alone would delete every trendLine on the chart,
-      // including the other Daily, 4H, and H1 tiers' own.
+      // script uses a distinct width (daily tiers 1, 4H tiers 2/3/4, H1
+      // tiers 5/6/7), so this cannot remove a sibling's lines. Matching on
+      // shapeType alone would delete every trendLine on the chart,
+      // including the Daily and 4H tiers' own.
       //
       // overrideOptions is the DrawingOverrides union across every drawing
       // tool, so dotted access (.linewidth) is a type error, per
       // fxrscripts/README.md Design 3. Bracket access is used to sidestep
-      // that. If the editor still rejects it, the fallback is to give this
-      // script a different shapeType from its siblings (rayLine rather
-      // than trendLine) and match on shapeType instead.
+      // that. If the editor still rejects it, the fallback is to give the
+      // H1 scripts a different shapeType from the Daily and 4H ones
+      // (rayLine rather than trendLine) and match on shapeType instead.
       deleteDrawingByCondition((drawing) => {
         const opts = drawing.overrideOptions;
         if (!opts) return false;
         return opts['linewidth'] === MY_LINEWIDTH;
       });
     }
-    dailySwingLastSpacing = inferredSpacing;
+    h1SwingLastSpacing = inferredSpacing;
     return;
   }
 
-  if (inferredSpacing !== dailySwingLastSpacing) {
+  if (inferredSpacing !== h1SwingLastSpacing) {
     // Arrived on our timeframe from somewhere else. Reset everything, so
     // the state machine does not resume on top of state accumulated from
     // the other timeframe's candles. Inlined rather than factored into a
     // helper because a helper cannot see top-level state.
-    dailySwingSwingHigh = NaN;
-    dailySwingSwingHighTime = null;
-    dailySwingHighCrossed = false;
-    dailySwingSwingLow = NaN;
-    dailySwingSwingLowTime = null;
-    dailySwingLowCrossed = false;
-    dailySwingPrevManualInput = false;
-    dailySwingLastRestartTime = null;
-    dailySwingLastSeenTime = null;
-    dailySwingAtr = NaN;
-    dailySwingTrSum = 0;
-    dailySwingTrCount = 0;
-    dailySwingStructure = null;
-    dailySwingLastSpacing = inferredSpacing;
+    h1SwingSwingHigh = NaN;
+    h1SwingSwingHighTime = null;
+    h1SwingHighCrossed = false;
+    h1SwingSwingLow = NaN;
+    h1SwingSwingLowTime = null;
+    h1SwingLowCrossed = false;
+    h1SwingPrevManualInput = false;
+    h1SwingLastRestartTime = null;
+    h1SwingLastSeenTime = null;
+    h1SwingAtr = NaN;
+    h1SwingTrSum = 0;
+    h1SwingTrCount = 0;
+    h1SwingStructure = null;
+    h1SwingLastSpacing = inferredSpacing;
   }
 
   // ---- One state-machine update per closed candle, gated on that
   // candle's own timestamp rather than `length` (see
   // daily_swing_structure.py for why). ----
   const currentTime = time(0);
-  if (currentTime === dailySwingLastSeenTime) {
+  if (currentTime === h1SwingLastSeenTime) {
     return;
   }
-  dailySwingLastSeenTime = currentTime;
+  h1SwingLastSeenTime = currentTime;
 
   const closeToday = closeC(0);
 
@@ -332,19 +320,19 @@ onTick = (length, _moment, _, ta, inputs) => {
         Math.abs(lowToday - prevClose)
       );
     }
-    if (Number.isNaN(dailySwingAtr)) {
-      dailySwingTrSum += trToday;
-      dailySwingTrCount += 1;
-      if (dailySwingTrCount === atrPeriod) {
-        dailySwingAtr = dailySwingTrSum / atrPeriod;
+    if (Number.isNaN(h1SwingAtr)) {
+      h1SwingTrSum += trToday;
+      h1SwingTrCount += 1;
+      if (h1SwingTrCount === atrPeriod) {
+        h1SwingAtr = h1SwingTrSum / atrPeriod;
       }
     } else {
-      dailySwingAtr = (dailySwingAtr * (atrPeriod - 1) + trToday) / atrPeriod;
+      h1SwingAtr = (h1SwingAtr * (atrPeriod - 1) + trToday) / atrPeriod;
     }
   }
 
   const manualRaw = manualRestartInput;
-  const manualTriggered = manualRaw && !dailySwingPrevManualInput;
+  const manualTriggered = manualRaw && !h1SwingPrevManualInput;
 
   let highBrokeReal = false;
   let lowBrokeReal = false;
@@ -356,33 +344,33 @@ onTick = (length, _moment, _, ta, inputs) => {
     // everywhere else in this project. Pivot candidates from before this
     // candle are ignored from here on, even once they would otherwise
     // become confirmable.
-    dailySwingSwingHigh = high(0);
-    dailySwingSwingHighTime = currentTime;
-    dailySwingHighCrossed = false;
-    dailySwingSwingLow = low(0);
-    dailySwingSwingLowTime = currentTime;
-    dailySwingLowCrossed = false;
-    dailySwingLastRestartTime = currentTime;
+    h1SwingSwingHigh = high(0);
+    h1SwingSwingHighTime = currentTime;
+    h1SwingHighCrossed = false;
+    h1SwingSwingLow = low(0);
+    h1SwingSwingLowTime = currentTime;
+    h1SwingLowCrossed = false;
+    h1SwingLastRestartTime = currentTime;
   } else {
     // A genuine cross is checked against whatever level was known BEFORE
     // today's own confirmation is applied, same ordering
     // fractal_detector.py uses.
-    if (!Number.isNaN(dailySwingSwingHigh) && !dailySwingHighCrossed && closeToday > dailySwingSwingHigh) {
+    if (!Number.isNaN(h1SwingSwingHigh) && !h1SwingHighCrossed && closeToday > h1SwingSwingHigh) {
       trendLine(
-        newPoint(dailySwingSwingHighTime, dailySwingSwingHigh),
-        newPoint(currentTime, dailySwingSwingHigh),
+        newPoint(h1SwingSwingHighTime, h1SwingSwingHigh),
+        newPoint(currentTime, h1SwingSwingHigh),
         { linecolor: color.white, linewidth: MY_LINEWIDTH, linestyle: 0 }
       );
-      dailySwingHighCrossed = true;
+      h1SwingHighCrossed = true;
       highBrokeReal = true;
     }
-    if (!Number.isNaN(dailySwingSwingLow) && !dailySwingLowCrossed && closeToday < dailySwingSwingLow) {
+    if (!Number.isNaN(h1SwingSwingLow) && !h1SwingLowCrossed && closeToday < h1SwingSwingLow) {
       trendLine(
-        newPoint(dailySwingSwingLowTime, dailySwingSwingLow),
-        newPoint(currentTime, dailySwingSwingLow),
+        newPoint(h1SwingSwingLowTime, h1SwingSwingLow),
+        newPoint(currentTime, h1SwingSwingLow),
         { linecolor: color.white, linewidth: MY_LINEWIDTH, linestyle: 0 }
       );
-      dailySwingLowCrossed = true;
+      h1SwingLowCrossed = true;
       lowBrokeReal = true;
     }
 
@@ -391,58 +379,58 @@ onTick = (length, _moment, _, ta, inputs) => {
     // that candle and now, or further back than it), so this is a pure
     // lookback, not a lookahead.
     const pivotTime = time(periods);
-    const pivotAllowed = dailySwingLastRestartTime === null || pivotTime >= dailySwingLastRestartTime;
+    const pivotAllowed = h1SwingLastRestartTime === null || pivotTime >= h1SwingLastRestartTime;
 
     if (pivotAllowed && !Number.isNaN(pivotTime)) {
       // The significance filter is inert while ATR has not seeded, and
       // inert while no pivot exists on the opposite side to measure a leg
       // against, so the first pivot on each side can never be filtered
       // out and the detector always seeds.
-      const atrKnown = filterOn && !Number.isNaN(dailySwingAtr);
+      const atrKnown = filterOn && !Number.isNaN(h1SwingAtr);
 
       const pivotHigh = high(periods);
       const isUpFractal =
-        dailySwingNearFrontierStrict(periods, pivotHigh, true, (k) => high(k)) &&
-        dailySwingFarFrontierTolerant(periods, pivotHigh, true, (k) => high(k), FRACTAL_TIE_TOLERANCE);
+        h1SwingNearFrontierStrict(periods, pivotHigh, true, (k) => high(k)) &&
+        h1SwingFarFrontierTolerant(periods, pivotHigh, true, (k) => high(k), FRACTAL_TIE_TOLERANCE);
       if (isUpFractal) {
         // Leg measured down to the last confirmed LOW: asks "was the swing
         // big enough", not "did the high move far enough".
         let keep = true;
-        if (atrKnown && !Number.isNaN(dailySwingSwingLow)) {
-          keep = Math.abs(pivotHigh - dailySwingSwingLow) >= minAtrSeparation * dailySwingAtr;
+        if (atrKnown && !Number.isNaN(h1SwingSwingLow)) {
+          keep = Math.abs(pivotHigh - h1SwingSwingLow) >= minAtrSeparation * h1SwingAtr;
         }
         if (keep) {
-          dailySwingSwingHigh = pivotHigh;
-          dailySwingSwingHighTime = pivotTime;
-          dailySwingHighCrossed = false;
+          h1SwingSwingHigh = pivotHigh;
+          h1SwingSwingHighTime = pivotTime;
+          h1SwingHighCrossed = false;
         }
       }
 
       const pivotLow = low(periods);
       const isDownFractal =
-        dailySwingNearFrontierStrict(periods, pivotLow, false, (k) => low(k)) &&
-        dailySwingFarFrontierTolerant(periods, pivotLow, false, (k) => low(k), FRACTAL_TIE_TOLERANCE);
+        h1SwingNearFrontierStrict(periods, pivotLow, false, (k) => low(k)) &&
+        h1SwingFarFrontierTolerant(periods, pivotLow, false, (k) => low(k), FRACTAL_TIE_TOLERANCE);
       if (isDownFractal) {
         let keep = true;
-        if (atrKnown && !Number.isNaN(dailySwingSwingHigh)) {
-          keep = Math.abs(pivotLow - dailySwingSwingHigh) >= minAtrSeparation * dailySwingAtr;
+        if (atrKnown && !Number.isNaN(h1SwingSwingHigh)) {
+          keep = Math.abs(pivotLow - h1SwingSwingHigh) >= minAtrSeparation * h1SwingAtr;
         }
         if (keep) {
-          dailySwingSwingLow = pivotLow;
-          dailySwingSwingLowTime = pivotTime;
-          dailySwingLowCrossed = false;
+          h1SwingSwingLow = pivotLow;
+          h1SwingSwingLowTime = pivotTime;
+          h1SwingLowCrossed = false;
         }
       }
     }
   }
 
-  // A close cannot be both above dailySwingSwingHigh and below
-  // dailySwingSwingLow at once, so these are mutually exclusive.
+  // A close cannot be both above h1SwingSwingHigh and below
+  // h1SwingSwingLow at once, so these are mutually exclusive.
   if (highBrokeReal) {
-    dailySwingStructure = 'bullish';
+    h1SwingStructure = 'bullish';
   } else if (lowBrokeReal) {
-    dailySwingStructure = 'bearish';
+    h1SwingStructure = 'bearish';
   }
 
-  dailySwingPrevManualInput = manualRaw;
+  h1SwingPrevManualInput = manualRaw;
 };

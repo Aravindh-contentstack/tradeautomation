@@ -1,5 +1,13 @@
 """Daily swing structure detector.
 
+SUPERSEDED July 29 2026: this lookback-plus-timeout mechanism is no longer
+part of the live Daily chain. swing_structure/daily_structure.py's
+compute_daily_structures now covers the Daily swing tier the same way it
+covers the internal and fractal tiers, all three via a Williams Fractal at
+a different n (see roadmap/detection-method-decision.md's "Daily port"
+section for why). This module is kept, unused, rather than deleted, as a
+comparison/rollback reference until nobody needs the old mechanism.
+
 Implements the confirmed rules from ethereal-coalescing-flute.md: a swing
 high and swing low that each persist until a real break, with an
 INDEPENDENT age clock and automatic timeout per side, and two manual

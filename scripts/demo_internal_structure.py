@@ -3,6 +3,10 @@ demo_swing_structure.py and demo_market_structure.py use, and prints a
 combined table (swing + internal side by side) so correctness can be
 checked by eye.
 
+NOTE July 29 2026: demonstrates the retired ATR-zigzag mechanism
+(swing_structure/internal_structure.py), superseded as the live Daily
+internal tier by scripts/demo_daily_structure.py.
+
 Internal structure now uses an ATR-based zigzag (atr_period=14,
 reversal_multiplier=1.5) rather than a fixed-candle-count pivot window
 or the swing tier's persist-until-broken plus timeout. See
