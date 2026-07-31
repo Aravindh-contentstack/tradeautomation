@@ -33,8 +33,8 @@ columns "{tier}_swing_high" while Daily uses bare "swing_high" /
 specific wrapper; a Daily equivalent can call compute_premium_discount
 directly with Daily's own column names when that work is scheduled.
 
-compute_h4_premium_discount feeds compute_premium_discount the h4_swing
-tier's swing_high/swing_low columns only after running them through
+compute_h4_premium_discount feeds compute_premium_discount each tier's
+swing_high/swing_low columns only after running them through
 swing_structure/current_range.py's compute_current_range first, since
 those raw columns go stale mid-trend (see that module's docstring). This
 module itself stays agnostic to that, compute_premium_discount doesn't
@@ -118,34 +118,32 @@ def compute_h4_premium_discount(df, tiers=("h4_swing", "h4_internal"), close_col
     close_column: price column compared against each tier's equilibrium.
 
     Returns a copy of df with one new "{tier}_zone" column per tier in
-    tiers, named per h4_zone_column_names(tiers). h4_swing additionally
-    gets "h4_swing_current_high"/"h4_swing_current_low" (see below).
+    tiers, named per h4_zone_column_names(tiers). Each tier additionally
+    gets "{tier}_current_high"/"{tier}_current_low" (see below).
     """
     result = df
     for tier in tiers:
         high_column = "%s_swing_high" % tier
         low_column = "%s_swing_low" % tier
 
-        if tier == "h4_swing":
-            # The swing tier's raw swing_high/swing_low freeze once a side
-            # is broken and price keeps running (h4_swing_structure.py's
-            # own "goes quiet in a strong trend" property), which would
-            # freeze the equilibrium right along with it instead of
-            # recalibrating as the trend extends. compute_current_range
-            # extends the broken side with the running extreme actually
-            # made since, while degrading to a no-op (reads the raw
-            # column live) on whichever side hasn't been broken. Not
-            # applied to h4_internal yet, that tier keeps reading its raw
-            # columns directly until this same fix is scheduled for it.
-            result = compute_current_range(
-                result,
-                swing_high_column=high_column,
-                swing_low_column=low_column,
-                output_high_column="%s_current_high" % tier,
-                output_low_column="%s_current_low" % tier,
-            )
-            high_column = "%s_current_high" % tier
-            low_column = "%s_current_low" % tier
+        # Both tiers' raw swing_high/swing_low freeze once a side is
+        # broken and price keeps running (the same "goes quiet in a
+        # strong trend" property h4_swing_structure.py documents applies
+        # equally to h4_internal_structure.py's Williams Fractal pivots),
+        # which would freeze the equilibrium right along with it instead
+        # of recalibrating as the trend extends. compute_current_range
+        # extends the broken side with the running extreme actually made
+        # since, while degrading to a no-op (reads the raw column live)
+        # on whichever side hasn't been broken.
+        result = compute_current_range(
+            result,
+            swing_high_column=high_column,
+            swing_low_column=low_column,
+            output_high_column="%s_current_high" % tier,
+            output_low_column="%s_current_low" % tier,
+        )
+        high_column = "%s_current_high" % tier
+        low_column = "%s_current_low" % tier
 
         result = compute_premium_discount(
             result,

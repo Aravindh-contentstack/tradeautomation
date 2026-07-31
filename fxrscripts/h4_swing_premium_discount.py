@@ -1,4 +1,4 @@
-// FXR Script visualization of premium/discount for the 4H SWING tier
+// FXR Script visualization of the 4H SWING tier's equilibrium price
 // (n=20). Not an independent detector: this is h4_swing_structure.py's
 // full fractal-detection engine, duplicated verbatim (FXR Script has no
 // import mechanism, see fxrscripts/README.md), with one drawing block
@@ -7,44 +7,56 @@
 // copy-drift bug, fix h4_swing_structure.py's copy first if the two were
 // meant to diverge, otherwise just resync this file from it.
 //
-// Python is the source of truth: swing_structure/premium_discount.py's
-// compute_premium_discount, applied to the h4_swing tier by
-// compute_h4_premium_discount. If this ever disagrees with the Python
-// for the same candles, fix the Python first, then re-port.
+// Python is the source of truth: swing_structure/current_range.py's
+// compute_current_range feeds swing_structure/premium_discount.py's
+// compute_premium_discount for the h4_swing tier. If this ever disagrees
+// with the Python for the same candles, fix the Python first, then
+// re-port.
 //
-// There is no existing TradingView reference indicator for premium/
-// discount to compare against (unlike swing/internal/fractal structure,
-// which all ported from a known-good Pine reference), so this script IS
-// the verification method, checked by eye against the rule itself:
-// equilibrium = (effectiveHigh + effectiveLow) / 2, premium is above it
-// in a bullish range and below it in a bearish range, discount is the
-// opposite half. effectiveHigh/effectiveLow, not the raw swing_high/
-// swing_low pivots directly: those freeze once a side is broken and
-// price keeps running (this tier's own "goes quiet in a strong trend"
-// property, documented below), so premium/discount extends whichever
-// side is stale with the running extreme actually made since, mirroring
-// swing_structure/current_range.py's compute_current_range. The side
-// that hasn't been broken is unaffected, it just reads its own pivot
-// live as before.
+// There is no existing TradingView reference indicator for this to
+// compare against (unlike swing/internal/fractal structure, which all
+// ported from a known-good Pine reference), so this script IS the
+// verification method, checked by eye against the rule itself:
+// equilibrium = (effectiveHigh + effectiveLow) / 2. effectiveHigh/
+// effectiveLow, not the raw swing_high/swing_low pivots directly: those
+// freeze once a side is broken and price keeps running (this tier's own
+// "goes quiet in a strong trend" property, documented below), so the
+// equilibrium extends whichever side is stale with the running extreme
+// actually made since, mirroring swing_structure/current_range.py's
+// compute_current_range. The side that hasn't been broken is unaffected,
+// it just reads its own pivot live as before.
 //
-// Visual: a shaded rectangle spans the tier's current (recalibrated)
-// range, tinted red for premium and green for discount, labeled
-// "PREMIUM"/"DISCOUNT" on the box itself, plus a thin "EQ" line at the
-// equilibrium price. Unlike the swing-level trendLine above (drawn once
-// at a cross and never touched again), this box can change every single
-// candle, both from price wiggling around equilibrium and from the
-// running side of the range extending further, so it is deleted and
-// redrawn every closed candle using deleteDrawingByCondition, the same
-// proven pattern fxrscripts/README.md's "Design 3" describes for
-// continuously-updated drawings.
+// Visual: a single thin ("EQ"-labeled) horizontalLine at the equilibrium
+// price of the tier's CURRENT (recalibrated) range only, nothing else.
+// An earlier version of this script also drew a shaded box spanning the
+// range's two corners in time, one tinted for a "premium"/"discount"
+// classification, but that box's left corner sat at whichever pivot's
+// own (possibly old) timestamp, so as the chart accumulated history the
+// box visually grew to cover every prior swing leg rather than just the
+// current one, reading as "premium/discount for all the current AND
+// previous structures" instead of just the latest. Removed entirely
+// rather than fixed, since a horizontalLine has no time corners to get
+// wrong in the first place, it is simply the current equilibrium price,
+// full width, always current. The equilibrium value itself still only
+// reflects the LATEST swing range (computed fresh every closed candle
+// from whatever h4SwingSwingHigh/h4SwingSwingLow/the running extremes are
+// right now), so nothing about past legs lingers in what gets drawn.
 //
-// The box/line are tagged with a reserved border/line color
-// (ZONE_TAG_COLOR) rather than MY_LINEWIDTH, since rectangle and
-// horizontalLine don't share the trendLine-only linewidth tagging
-// convention the rest of this file's engine uses for its own swing-level
-// lines. The two premium/discount scripts (this one and
-// h4_internal_premium_discount.py) each use a different ZONE_TAG_COLOR,
-// so neither's cleanup can delete the other's box.
+// The line is deleted and redrawn every closed candle (unlike the
+// swing-level trendLines above, which are drawn once at a cross and
+// never touched again), since the equilibrium price itself can change
+// every candle, both from a fresh pivot confirming and from the running
+// side of the range extending further. This is fxrscripts/README.md's
+// proven "Design 3" pattern: content-matched deletion via
+// deleteDrawingByCondition, not id tracking, since id tracking was found
+// to leave stale drawings behind during fxreplay's replay stepping.
+//
+// The line is tagged with a reserved color (EQ_LINE_COLOR) rather than
+// MY_LINEWIDTH, since horizontalLine doesn't share the trendLine-only
+// linewidth tagging convention the rest of this file's engine uses for
+// its own swing-level lines. This script and its internal-tier sibling
+// (h4_internal_premium_discount.py) each use a different EQ_LINE_COLOR,
+// so neither's cleanup can delete the other's line.
 
 const FRACTAL_TIE_TOLERANCE = 4;
 
@@ -77,17 +89,15 @@ const TF_MIN_VALID_BARS = 5;
 // changes, this is unnecessary work and can be set to false.
 const TF_CLEANUP_ON_MISMATCH = true;
 
-// Reserved tag color for this script's zone rectangle and equilibrium
-// line, read back via bracket access on overrideOptions (dotted access
-// is a type error on the DrawingOverrides union, see
-// fxrscripts/README.md Design 3). Orange, distinct from every trendLine
-// color already in use (white, red, green) and from the internal tier's
-// own zone tag (cyan, in h4_internal_premium_discount.py), so
-// deleteDrawingByCondition below can never touch a sibling script's
-// drawings.
-const ZONE_TAG_COLOR = color.rgba(255, 165, 0, 1);
-const PREMIUM_FILL = color.rgba(255, 0, 0, 0.15);
-const DISCOUNT_FILL = color.rgba(0, 200, 0, 0.15);
+// Reserved tag color for this script's equilibrium line, read back via
+// bracket access on overrideOptions (dotted access is a type error on
+// the DrawingOverrides union, see fxrscripts/README.md Design 3).
+// Orange, distinct from every trendLine color already in use (white,
+// red, green) and from the internal tier's own tag (cyan, in
+// h4_internal_premium_discount.py), so deleteDrawingByCondition below can
+// never touch a sibling script's drawing.
+const EQ_LINE_COLOR = color.rgba(255, 165, 0, 1);
+const EQ_LINE_WIDTH = 1;
 
 let h4SwingSwingHigh = NaN;
 let h4SwingSwingHighTime = null;
@@ -256,17 +266,15 @@ onTick = (length, _moment, _, ta, inputs) => {
     if (TF_CLEANUP_ON_MISMATCH) {
       // Deletes only THIS script's own trendLines (matched on linewidth,
       // shared with h4_swing_structure.py's tag) and this script's own
-      // zone rectangle/equilibrium line (matched on ZONE_TAG_COLOR).
-      // overrideOptions is the DrawingOverrides union across every drawing
-      // tool, so dotted access (.linewidth) is a type error, per
-      // fxrscripts/README.md Design 3. Bracket access is used to sidestep
-      // that.
+      // equilibrium line (matched on EQ_LINE_COLOR). overrideOptions is
+      // the DrawingOverrides union across every drawing tool, so dotted
+      // access (.linewidth) is a type error, per fxrscripts/README.md
+      // Design 3. Bracket access is used to sidestep that.
       deleteDrawingByCondition((drawing) => {
         const opts = drawing.overrideOptions;
         if (!opts) return false;
         if (opts['linewidth'] === MY_LINEWIDTH) return true;
-        if (drawing.shapeType === 'rectangle' && opts['color'] === ZONE_TAG_COLOR) return true;
-        if (drawing.shapeType === 'horizontal_line' && opts['linecolor'] === ZONE_TAG_COLOR) return true;
+        if (drawing.shapeType === 'horizontal_line' && opts['linecolor'] === EQ_LINE_COLOR) return true;
         return false;
       });
     }
@@ -470,61 +478,31 @@ onTick = (length, _moment, _, ta, inputs) => {
   const effectiveHigh = Number.isNaN(h4SwingSwingHigh) ? NaN : Math.max(h4SwingSwingHigh, h4SwingRunningMaxHigh);
   const effectiveLow = Number.isNaN(h4SwingSwingLow) ? NaN : Math.min(h4SwingSwingLow, h4SwingRunningMinLow);
 
-  // ---- Premium/discount zone, appended to h4_swing_structure.py's engine.
-  // Same rule as swing_structure/premium_discount.py's compute_premium_discount:
-  // equilibrium = (effectiveHigh + effectiveLow) / 2; bullish is premium above
-  // it and discount at-or-below; bearish is the mirror image. Undetermined
-  // structure or a still-warming-up range (either swing level still NaN)
-  // draws nothing, matching the Python's None output for those rows. ----
+  // ---- Equilibrium of the CURRENT range only, appended to
+  // h4_swing_structure.py's engine. equilibrium = (effectiveHigh +
+  // effectiveLow) / 2, recomputed fresh every closed candle from
+  // whatever the current pivots/running extremes are right now, so
+  // nothing about a past leg lingers here once the range has moved on.
+  // Undetermined structure or a still-warming-up range (either swing
+  // level still NaN) draws nothing. ----
   const equilibrium = (effectiveHigh + effectiveLow) / 2;
+  const haveEquilibrium = !Number.isNaN(equilibrium) && h4SwingStructure !== null;
 
-  let zone = null;
-  if (!Number.isNaN(equilibrium) && h4SwingStructure !== null) {
-    if (h4SwingStructure === 'bullish') {
-      zone = closeToday > equilibrium ? 'premium' : 'discount';
-    } else {
-      zone = closeToday <= equilibrium ? 'premium' : 'discount';
-    }
-  }
-
-  // Delete this script's own zone box + equilibrium line every closed
-  // candle before redrawing, since the zone can flip on any candle as
-  // price wiggles around equilibrium (unlike the swing-level trendLines
-  // above, which are drawn once at a genuine cross and never touched
-  // again). This is fxrscripts/README.md's proven "Design 3" pattern:
+  // Delete this script's own equilibrium line every closed candle before
+  // redrawing, since its price can change on any candle (a fresh pivot
+  // confirming, or the running side of the range extending further).
+  // This is fxrscripts/README.md's proven "Design 3" pattern:
   // content-matched deletion, not id tracking, since id tracking was
   // found to leave stale drawings behind during fxreplay's replay
-  // stepping. Matched on ZONE_TAG_COLOR, never on shapeType alone, so
-  // this cannot delete another script's rectangle or horizontal line.
+  // stepping. Matched on EQ_LINE_COLOR, never on shapeType alone, so
+  // this cannot delete another script's horizontal line.
   deleteDrawingByCondition((drawing) => {
     const opts = drawing.overrideOptions;
     if (!opts) return false;
-    if (drawing.shapeType === 'rectangle' && opts['color'] === ZONE_TAG_COLOR) return true;
-    if (drawing.shapeType === 'horizontal_line' && opts['linecolor'] === ZONE_TAG_COLOR) return true;
-    return false;
+    return drawing.shapeType === 'horizontal_line' && opts['linecolor'] === EQ_LINE_COLOR;
   });
 
-  if (zone !== null) {
-    const boxColor = zone === 'premium' ? PREMIUM_FILL : DISCOUNT_FILL;
-    const startTime = Math.min(h4SwingSwingHighTime, h4SwingSwingLowTime);
-    // effectiveHigh/effectiveLow, not the raw pivots: the box's top (or
-    // bottom, whichever side is currently running) extends candle to
-    // candle along with the running extreme instead of stopping at an
-    // already-broken level.
-    rectangle(
-      startTime, effectiveHigh,
-      currentTime, effectiveLow,
-      {
-        color: ZONE_TAG_COLOR,
-        backgroundColor: boxColor,
-        fillBackground: true,
-        extendRight: true,
-        showLabel: true,
-        textColor: ZONE_TAG_COLOR,
-        bold: true,
-      },
-      zone.toUpperCase()
-    );
+  if (haveEquilibrium) {
     // Real signature, triangulated from three successive editor errors
     // (not the docs' claimed horizontalLine(time, price, styles, text),
     // same class of docs-vs-editor mismatch fxrscripts/README.md's Design
@@ -538,6 +516,6 @@ onTick = (length, _moment, _, ta, inputs) => {
     // exist in type HorzlineLineToolOverrides" (that type has no text
     // field at all). So the real shape is (price, styles?, text?), the
     // label as its own 3rd positional argument.
-    horizontalLine(equilibrium, { linecolor: ZONE_TAG_COLOR, linewidth: 1 }, 'EQ');
+    horizontalLine(equilibrium, { linecolor: EQ_LINE_COLOR, linewidth: EQ_LINE_WIDTH }, 'EQ');
   }
 };

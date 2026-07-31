@@ -85,48 +85,49 @@ def main():
         )
     print()
 
-    print("Raw swing_high/swing_low vs. the recalibrated current_high/current_low")
-    print("h4_swing uses for premium/discount (h4_internal is unaffected, still on")
-    print("its raw columns), printed only on rows where either differs:")
-    header2 = "%-18s | %10s | %12s | %12s | %12s | %12s" % (
-        "date", "close", "raw_high", "current_high", "raw_low", "current_low",
-    )
-    print(header2)
-    print("-" * len(header2))
-    prev_raw_high = object()
-    prev_current_high = object()
-    prev_raw_low = object()
-    prev_current_low = object()
-    for _, row in result.iterrows():
-        raw_high = row["h4_swing_swing_high"]
-        current_high = row["h4_swing_current_high"]
-        raw_low = row["h4_swing_swing_low"]
-        current_low = row["h4_swing_current_low"]
-        if (
-            _same(raw_high, prev_raw_high)
-            and _same(current_high, prev_current_high)
-            and _same(raw_low, prev_raw_low)
-            and _same(current_low, prev_current_low)
-        ):
+    print("Raw swing_high/swing_low vs. the recalibrated current_high/current_low,")
+    print("printed only on rows where either differs, per tier:")
+    for tier in TIERS:
+        print("  -- %s --" % tier)
+        header2 = "  %-18s | %10s | %12s | %12s | %12s | %12s" % (
+            "date", "close", "raw_high", "current_high", "raw_low", "current_low",
+        )
+        print(header2)
+        print("  " + "-" * (len(header2) - 2))
+        prev_raw_high = object()
+        prev_current_high = object()
+        prev_raw_low = object()
+        prev_current_low = object()
+        for _, row in result.iterrows():
+            raw_high = row["%s_swing_high" % tier]
+            current_high = row["%s_current_high" % tier]
+            raw_low = row["%s_swing_low" % tier]
+            current_low = row["%s_current_low" % tier]
+            if (
+                _same(raw_high, prev_raw_high)
+                and _same(current_high, prev_current_high)
+                and _same(raw_low, prev_raw_low)
+                and _same(current_low, prev_current_low)
+            ):
+                prev_raw_high, prev_current_high = raw_high, current_high
+                prev_raw_low, prev_current_low = raw_low, current_low
+                continue
             prev_raw_high, prev_current_high = raw_high, current_high
             prev_raw_low, prev_current_low = raw_low, current_low
-            continue
-        prev_raw_high, prev_current_high = raw_high, current_high
-        prev_raw_low, prev_current_low = raw_low, current_low
-        if pd.isna(raw_high) and pd.isna(raw_low):
-            continue
-        print(
-            "%-18s | %10.4f | %12.4f | %12.4f | %12.4f | %12.4f"
-            % (
-                row["date"].strftime("%Y-%m-%d %H:%M"),
-                row["close"],
-                raw_high,
-                current_high,
-                raw_low,
-                current_low,
+            if pd.isna(raw_high) and pd.isna(raw_low):
+                continue
+            print(
+                "  %-18s | %10.4f | %12.4f | %12.4f | %12.4f | %12.4f"
+                % (
+                    row["date"].strftime("%Y-%m-%d %H:%M"),
+                    row["close"],
+                    raw_high,
+                    current_high,
+                    raw_low,
+                    current_low,
+                )
             )
-        )
-    print()
+        print()
 
     print("Hand-pickable rows (verify by eye against the printed high/low/close):")
     picks = [
@@ -134,14 +135,14 @@ def main():
         ("h4_swing", "bullish", False, "near swing low, expect discount"),
         ("h4_swing", "bearish", False, "near swing low, expect premium"),
         ("h4_swing", "bearish", True, "near swing high, expect discount"),
+        ("h4_internal", "bullish", True, "near swing high, expect premium"),
+        ("h4_internal", "bullish", False, "near swing low, expect discount"),
+        ("h4_internal", "bearish", False, "near swing low, expect premium"),
+        ("h4_internal", "bearish", True, "near swing high, expect discount"),
     ]
     for tier, direction, near_high, note in picks:
-        if tier == "h4_swing":
-            high_col = "h4_swing_current_high"
-            low_col = "h4_swing_current_low"
-        else:
-            high_col = "%s_swing_high" % tier
-            low_col = "%s_swing_low" % tier
+        high_col = "%s_current_high" % tier
+        low_col = "%s_current_low" % tier
         structure_col = "%s_structure" % tier
         zone_col = "%s_zone" % tier
 
@@ -175,8 +176,11 @@ def main():
     print("\nZone columns present: %s" % zone_columns)
     print("h4_fractal_zone present: %s" % ("h4_fractal_zone" in result.columns))
     print(
-        "h4_internal_current_high/_low present: %s (should be False, that tier still uses raw columns)"
-        % ("h4_internal_current_high" in result.columns or "h4_internal_current_low" in result.columns)
+        "current_high/_low present for both tiers: %s"
+        % all(
+            "%s_current_high" % tier in result.columns and "%s_current_low" % tier in result.columns
+            for tier in TIERS
+        )
     )
 
 
