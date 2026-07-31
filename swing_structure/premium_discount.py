@@ -30,8 +30,8 @@ Generic across any (high, low, structure) column triple rather than
 hardcoded to one timeframe's naming convention, because 4H names its
 columns "{tier}_swing_high" while Daily uses bare "swing_high" /
 "internal_swing_high". compute_h4_premium_discount below is the 4H-
-specific wrapper; a Daily equivalent can call compute_premium_discount
-directly with Daily's own column names when that work is scheduled.
+specific wrapper, alongside compute_daily_premium_discount for Daily and
+compute_h1_premium_discount for H1.
 
 compute_h4_premium_discount feeds compute_premium_discount each tier's
 swing_high/swing_low columns only after running them through
@@ -130,6 +130,112 @@ def compute_h4_premium_discount(df, tiers=("h4_swing", "h4_internal"), close_col
         # broken and price keeps running (the same "goes quiet in a
         # strong trend" property h4_swing_structure.py documents applies
         # equally to h4_internal_structure.py's Williams Fractal pivots),
+        # which would freeze the equilibrium right along with it instead
+        # of recalibrating as the trend extends. compute_current_range
+        # extends the broken side with the running extreme actually made
+        # since, while degrading to a no-op (reads the raw column live)
+        # on whichever side hasn't been broken.
+        result = compute_current_range(
+            result,
+            swing_high_column=high_column,
+            swing_low_column=low_column,
+            output_high_column="%s_current_high" % tier,
+            output_low_column="%s_current_low" % tier,
+        )
+        high_column = "%s_current_high" % tier
+        low_column = "%s_current_low" % tier
+
+        result = compute_premium_discount(
+            result,
+            high_column=high_column,
+            low_column=low_column,
+            structure_column="%s_structure" % tier,
+            output_column="%s_zone" % tier,
+            close_column=close_column,
+        )
+    return result
+
+
+def daily_zone_column_names(tiers=("daily_swing", "daily_internal")):
+    """The zone column names compute_daily_premium_discount emits."""
+    return ["%s_zone" % tier for tier in tiers]
+
+
+def compute_daily_premium_discount(df, tiers=("daily_swing", "daily_internal"), close_column="close"):
+    """Computes premium/discount zones for the given Daily tiers.
+
+    df: the combined table already produced by compute_daily_structures
+        (swing_structure/daily_structure.py), carrying each tier's
+        {tier}_swing_high, {tier}_swing_low, {tier}_structure columns.
+    tiers: which tiers to compute a zone for. Defaults to daily_swing and
+        daily_internal only. daily_fractal is deliberately excluded for the
+        same reason h4_fractal is: at n=2 its range is too short-lived to
+        read as a meaningful premium/discount range.
+    close_column: price column compared against each tier's equilibrium.
+
+    Returns a copy of df with one new "{tier}_zone" column per tier in
+    tiers, named per daily_zone_column_names(tiers). Each tier additionally
+    gets "{tier}_current_high"/"{tier}_current_low".
+    """
+    result = df
+    for tier in tiers:
+        high_column = "%s_swing_high" % tier
+        low_column = "%s_swing_low" % tier
+
+        # Both tiers' raw swing_high/swing_low freeze once a side is broken
+        # (same logic as compute_h4_premium_discount).
+        # compute_current_range extends the broken side with the running extreme.
+        result = compute_current_range(
+            result,
+            swing_high_column=high_column,
+            swing_low_column=low_column,
+            output_high_column="%s_current_high" % tier,
+            output_low_column="%s_current_low" % tier,
+        )
+        high_column = "%s_current_high" % tier
+        low_column = "%s_current_low" % tier
+
+        result = compute_premium_discount(
+            result,
+            high_column=high_column,
+            low_column=low_column,
+            structure_column="%s_structure" % tier,
+            output_column="%s_zone" % tier,
+            close_column=close_column,
+        )
+    return result
+
+
+def h1_zone_column_names(tiers=("h1_swing", "h1_internal")):
+    """The zone column names compute_h1_premium_discount emits."""
+    return ["%s_zone" % tier for tier in tiers]
+
+
+def compute_h1_premium_discount(df, tiers=("h1_swing", "h1_internal"), close_column="close"):
+    """Computes premium/discount zones for the given H1 tiers.
+
+    df: the combined table already produced by compute_h1_structures
+        (swing_structure/h1_structure.py), carrying each tier's
+        {tier}_swing_high, {tier}_swing_low, {tier}_structure columns.
+    tiers: which tiers to compute a zone for. Defaults to h1_swing and
+        h1_internal only, h1_fractal is deliberately excluded: at n=2 its
+        range is too short-lived to read as a meaningful premium/discount
+        range. Pass a tuple including "h1_fractal" to opt in later.
+    close_column: price column compared against each tier's equilibrium.
+
+    Returns a copy of df with one new "{tier}_zone" column per tier in
+    tiers, named per h1_zone_column_names(tiers). Each tier additionally
+    gets "{tier}_current_high"/"{tier}_current_low" (see below).
+    """
+    result = df
+    for tier in tiers:
+        high_column = "%s_swing_high" % tier
+        low_column = "%s_swing_low" % tier
+
+        # Both tiers' raw swing_high/swing_low freeze once a side is
+        # broken and price keeps running (the same "goes quiet in a
+        # strong trend" property h1_swing_structure.py documents applies
+        # equally to h1_internal_structure.py's Williams Fractal pivots),
         # which would freeze the equilibrium right along with it instead
         # of recalibrating as the trend extends. compute_current_range
         # extends the broken side with the running extreme actually made

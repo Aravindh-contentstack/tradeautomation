@@ -59,6 +59,8 @@ _STRUCTURE_COLUMNS = {
     "h1_swing": "h1_swing_structure",
     "h1_internal": "h1_internal_structure",
     "h1_fractal": "h1_fractal_structure",
+    "daily_swing_zone": "daily_swing_zone",
+    "daily_internal_zone": "daily_internal_zone",
     "h4_swing_zone": "h4_swing_zone",
     "h4_internal_zone": "h4_internal_zone",
 }
@@ -78,10 +80,12 @@ def get_current_structure(df):
     Returns a dict: {"date": <the last row's date>, "swing": <value>,
     "internal": <value>, "fractal": <value>, "h4_swing": <value>,
     "h4_internal": <value>, "h4_fractal": <value>, "h1_swing": <value>,
-    "h1_internal": <value>, "h1_fractal": <value>, "h4_swing_zone": <value>,
-    "h4_internal_zone": <value>}. The last two are "premium"/"discount"
-    rather than "bullish"/"bearish", from compute_h4_premium_discount, not
-    compute_h4_structures. Every key in _STRUCTURE_COLUMNS is always
+    "h1_internal": <value>, "h1_fractal": <value>,
+    "daily_swing_zone": <value>, "daily_internal_zone": <value>,
+    "h4_swing_zone": <value>, "h4_internal_zone": <value>}.
+    The zone keys are "premium"/"discount" rather than "bullish"/"bearish",
+    from compute_daily_premium_discount and compute_h4_premium_discount,
+    not compute_*_structures. Every key in _STRUCTURE_COLUMNS is always
     present. A value is None if that column
     isn't in df at all (not yet computed) or if the column's own value is
     None (computed, but still undetermined), the caller only ever needs
