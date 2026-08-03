@@ -6,7 +6,7 @@ swing_high/swing_low/structure columns it produces are exactly what
 compute_h1_premium_discount needs, and duplicating the generator would
 only risk the two demos drifting out of sync.
 
-Run from the repo root:  python scripts/demo_premium_discount.py
+Run from the repo root:  python scripts/demo_h1_premium_discount.py
 """
 
 import sys

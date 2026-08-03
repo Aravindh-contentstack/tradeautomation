@@ -64,7 +64,7 @@ const FRACTAL_TIE_TOLERANCE = 4;
 // TIMEFRAME ISOLATION. This block is duplicated VERBATIM (bar the two
 // constants) in all nine structure scripts: daily_swing_structure.py,
 // daily_internal_structure.py, daily_fractal_structure.py,
-// h1_fractal_structure.py, h1_internal_structure.py, h1_swing_structure.py,
+// h4_fractal_structure.py, h4_internal_structure.py, h4_swing_structure.py,
 // h1_fractal_structure.py, h1_internal_structure.py, h1_swing_structure.py.
 // FXR Script has no import mechanism, so a change here has to be applied
 // to all nine (plus this one and its internal-tier sibling) by hand.
@@ -91,12 +91,14 @@ const TF_CLEANUP_ON_MISMATCH = true;
 
 // Reserved tag color for this script's equilibrium line, read back via
 // bracket access on overrideOptions (dotted access is a type error on
-// the DrawingOverrides union, see fxrscripts/README.md Design 3).
-// Orange, distinct from every trendLine color already in use (white,
-// red, green) and from the internal tier's own tag (cyan, in
-// h1_internal_premium_discount.py), so deleteDrawingByCondition below can
-// never touch a sibling script's drawing.
-const EQ_LINE_COLOR = color.rgba(255, 165, 0, 1);
+// the DrawingOverrides union, see fxrscripts/README.md Design 3). Gold,
+// distinct from every trendLine color already in use (white, red,
+// green) and from every OTHER premium/discount script's own tag: the
+// internal-tier scripts (cyan/azure/turquoise) AND the swing-tier
+// scripts on the other two timeframes (daily_swing's orange, h4_swing's
+// coral), so deleteDrawingByCondition below can never touch a sibling
+// script's drawing, on this timeframe or another.
+const EQ_LINE_COLOR = color.rgba(255, 215, 0, 1);
 const EQ_LINE_WIDTH = 1;
 
 let h1SwingSwingHigh = NaN;

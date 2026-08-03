@@ -12,30 +12,34 @@
 // compute_h4_premium_discount. If this ever disagrees with the Python
 // for the same candles, fix the Python first, then re-port.
 //
-// Reads h4InternalSwingHigh/h4InternalSwingLow directly, unlike its
-// swing-tier sibling (h4_swing_premium_discount.py), which extends a
-// stale, already-broken pivot with the running extreme made since (see
-// swing_structure/current_range.py). That same staleness applies here
-// too (h4_internal_structure.py's Williams Fractal pivots also freeze
-// once a side is broken and price keeps running), it just hasn't been
-// fixed for this tier yet, deferred deliberately rather than forgotten.
+// equilibrium = (effectiveHigh + effectiveLow) / 2. effectiveHigh/
+// effectiveLow, not the raw swing_high/swing_low pivots directly: those
+// freeze once a side is broken and price keeps running (this tier's own
+// "goes quiet in a strong trend" property, same as h4_swing_structure.py
+// documents for its own pivots), so the equilibrium extends whichever
+// side is stale with the running extreme actually made since, mirroring
+// swing_structure/current_range.py's compute_current_range. The side
+// that hasn't been broken is unaffected, it just reads its own pivot
+// live as before. This tier used to read the raw pivots directly,
+// deferred deliberately rather than forgotten; now fixed to match its
+// swing-tier sibling (h4_swing_premium_discount.py).
 //
 // There is no existing TradingView reference indicator for this to
 // compare against (unlike swing/internal/fractal structure, which all
 // ported from a known-good Pine reference), so this script IS the
-// verification method, checked by eye against the rule itself:
-// equilibrium = (swingHigh + swingLow) / 2.
+// verification method, checked by eye against the rule itself above.
 //
 // Visual: a single thin ("EQ"-labeled) horizontalLine at the equilibrium
-// price, nothing else. An earlier version also drew a shaded box spanning
-// the range's two corners in time, but that box's left corner sat at
-// whichever pivot's own (possibly old) timestamp, so as the chart
-// accumulated history the box visually grew to cover every prior swing
-// leg rather than just the current one. Removed entirely rather than
-// fixed, since a horizontalLine has no time corners to get wrong in the
-// first place, it is simply the current equilibrium price, full width,
-// always current (see h4_swing_premium_discount.py's docstring for the
-// fuller account of why the box was dropped).
+// price of the tier's CURRENT (recalibrated) range only, nothing else.
+// An earlier version also drew a shaded box spanning the range's two
+// corners in time, but that box's left corner sat at whichever pivot's
+// own (possibly old) timestamp, so as the chart accumulated history the
+// box visually grew to cover every prior swing leg rather than just the
+// current one. Removed entirely rather than fixed, since a horizontalLine
+// has no time corners to get wrong in the first place, it is simply the
+// current equilibrium price, full width, always current (see
+// h4_swing_premium_discount.py's docstring for the fuller account of why
+// the box was dropped).
 //
 // The line is deleted and redrawn every closed candle (unlike the
 // swing-level trendLines above, which are drawn once at a cross and
@@ -85,12 +89,14 @@ const TF_CLEANUP_ON_MISMATCH = true;
 
 // Reserved tag color for this script's equilibrium line, read back via
 // bracket access on overrideOptions (dotted access is a type error on
-// the DrawingOverrides union, see fxrscripts/README.md Design 3). Cyan,
-// distinct from every trendLine color already in use (white, red, green)
-// and from the swing tier's own tag (orange, in
-// h4_swing_premium_discount.py), so deleteDrawingByCondition below can
-// never touch a sibling script's drawing.
-const EQ_LINE_COLOR = color.rgba(0, 200, 255, 1);
+// the DrawingOverrides union, see fxrscripts/README.md Design 3). Azure,
+// distinct from every trendLine color already in use (white, red,
+// green) and from every OTHER premium/discount script's own tag: the
+// swing-tier scripts (coral/gold/orange) AND the internal-tier scripts
+// on the other two timeframes (daily_internal's cyan, h1_internal's
+// turquoise), so deleteDrawingByCondition below can never touch a
+// sibling script's drawing, on this timeframe or another.
+const EQ_LINE_COLOR = color.rgba(0, 128, 255, 1);
 const EQ_LINE_WIDTH = 1;
 
 let h4InternalSwingHigh = NaN;
@@ -119,6 +125,24 @@ let h4InternalLastSpacing = null;
 // flips ONLY on a genuine cross, never on a manual restart or a silent
 // reversal confirmation.
 let h4InternalStructure = null;
+
+// The "current range" state premium/discount reads instead of
+// h4InternalSwingHigh/h4InternalSwingLow directly. Mirrors
+// swing_structure/current_range.py's compute_current_range: h4InternalSwingHigh
+// freezes at its last confirmed level once broken and price keeps
+// running (this tier's own "goes quiet in a strong trend" property,
+// documented above), so premium/discount needs the running high/low
+// actually made since that level last changed instead, or the
+// equilibrium would freeze right along with the stale pivot. On
+// whichever side hasn't been broken, this degrades to a no-op: the
+// running extreme never exceeds the still-live pivot, so effectiveHigh/
+// effectiveLow below just reads that pivot's own value, live, updating
+// exactly when it legitimately updates via the fractal engine above,
+// same as before this fix.
+let h4InternalRunningMaxHigh = NaN;
+let h4InternalPrevSwingHighForRange = NaN;
+let h4InternalRunningMinLow = NaN;
+let h4InternalPrevSwingLowForRange = NaN;
 
 //@version=1
 
@@ -276,6 +300,10 @@ onTick = (length, _moment, _, ta, inputs) => {
     h4InternalTrSum = 0;
     h4InternalTrCount = 0;
     h4InternalStructure = null;
+    h4InternalRunningMaxHigh = NaN;
+    h4InternalPrevSwingHighForRange = NaN;
+    h4InternalRunningMinLow = NaN;
+    h4InternalPrevSwingLowForRange = NaN;
     h4InternalLastSpacing = inferredSpacing;
   }
 
@@ -422,11 +450,42 @@ onTick = (length, _moment, _, ta, inputs) => {
 
   h4InternalPrevManualInput = manualRaw;
 
-  // ---- Equilibrium, appended to h4_internal_structure.py's engine.
-  // equilibrium = (swingHigh + swingLow) / 2. Undetermined structure or a
-  // still-warming-up range (either swing level still NaN) draws nothing.
-  // ----
-  const equilibrium = (h4InternalSwingHigh + h4InternalSwingLow) / 2;
+  // ---- Current range: extends whichever side is stale (already broken,
+  // with price still running and no fresh pivot confirmed yet) with the
+  // running extreme made since that side's pivot last changed value,
+  // mirrors swing_structure/current_range.py's compute_current_range.
+  // Degrades to a no-op on the side that hasn't been broken: the running
+  // extreme there never exceeds the still-live pivot, so effectiveHigh/
+  // effectiveLow just reads that pivot directly, unchanged from before
+  // this fix. ----
+  if (!Number.isNaN(h4InternalSwingHigh)) {
+    if (Number.isNaN(h4InternalPrevSwingHighForRange) || h4InternalSwingHigh !== h4InternalPrevSwingHighForRange) {
+      h4InternalRunningMaxHigh = high(0);
+    } else {
+      h4InternalRunningMaxHigh = Math.max(h4InternalRunningMaxHigh, high(0));
+    }
+  }
+  if (!Number.isNaN(h4InternalSwingLow)) {
+    if (Number.isNaN(h4InternalPrevSwingLowForRange) || h4InternalSwingLow !== h4InternalPrevSwingLowForRange) {
+      h4InternalRunningMinLow = low(0);
+    } else {
+      h4InternalRunningMinLow = Math.min(h4InternalRunningMinLow, low(0));
+    }
+  }
+  h4InternalPrevSwingHighForRange = h4InternalSwingHigh;
+  h4InternalPrevSwingLowForRange = h4InternalSwingLow;
+
+  const effectiveHigh = Number.isNaN(h4InternalSwingHigh) ? NaN : Math.max(h4InternalSwingHigh, h4InternalRunningMaxHigh);
+  const effectiveLow = Number.isNaN(h4InternalSwingLow) ? NaN : Math.min(h4InternalSwingLow, h4InternalRunningMinLow);
+
+  // ---- Equilibrium of the CURRENT range only, appended to
+  // h4_internal_structure.py's engine. equilibrium = (effectiveHigh +
+  // effectiveLow) / 2, recomputed fresh every closed candle from
+  // whatever the current pivots/running extremes are right now, so
+  // nothing about a past leg lingers here once the range has moved on.
+  // Undetermined structure or a still-warming-up range (either swing
+  // level still NaN) draws nothing. ----
+  const equilibrium = (effectiveHigh + effectiveLow) / 2;
   const haveEquilibrium = !Number.isNaN(equilibrium) && h4InternalStructure !== null;
 
   // Delete this script's own equilibrium line every closed candle before

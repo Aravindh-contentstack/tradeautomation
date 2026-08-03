@@ -6,15 +6,16 @@ Nothing new is computed here. swing_structure/daily_structure.py's
 compute_daily_structures produces daily_swing_structure,
 daily_internal_structure and daily_fractal_structure (the three Daily
 tiers, all via the same Williams Fractal detector at different n), and
-swing_structure/h4_structure.py's compute_h4_structures produces the
-matching h4_*_structure columns for 4H, both via the same
+swing_structure/h4_structure.py's and swing_structure/h1_structure.py's
+compute_h4_structures/compute_h1_structures produce the matching
+h4_*_structure/h1_*_structure columns for 4H and H1, all via the same
 compute_market_structure rule underneath (only a genuine break flips it).
-swing_structure/premium_discount.py separately produces the h4_swing_zone
-and h4_internal_zone columns (premium/discount within each tier's own
-range), via a different, stateless rule, not a break/flip history like
-the structure columns. This module just answers "what is the state right
-now" instead of every caller reaching into a DataFrame and pulling the
-last row by hand.
+swing_structure/premium_discount.py separately produces the
+{prefix}_swing_zone and {prefix}_internal_zone columns for each timeframe
+(premium/discount within each tier's own range), via a different,
+stateless rule, not a break/flip history like the structure columns.
+This module just answers "what is the state right now" instead of every
+caller reaching into a DataFrame and pulling the last row by hand.
 
 Daily used to be wired to a different set of columns (market_structure,
 internal_structure, fractal_structure), produced by three separate
@@ -63,6 +64,8 @@ _STRUCTURE_COLUMNS = {
     "daily_internal_zone": "daily_internal_zone",
     "h4_swing_zone": "h4_swing_zone",
     "h4_internal_zone": "h4_internal_zone",
+    "h1_swing_zone": "h1_swing_zone",
+    "h1_internal_zone": "h1_internal_zone",
 }
 
 
@@ -82,11 +85,12 @@ def get_current_structure(df):
     "h4_internal": <value>, "h4_fractal": <value>, "h1_swing": <value>,
     "h1_internal": <value>, "h1_fractal": <value>,
     "daily_swing_zone": <value>, "daily_internal_zone": <value>,
-    "h4_swing_zone": <value>, "h4_internal_zone": <value>}.
+    "h4_swing_zone": <value>, "h4_internal_zone": <value>,
+    "h1_swing_zone": <value>, "h1_internal_zone": <value>}.
     The zone keys are "premium"/"discount" rather than "bullish"/"bearish",
-    from compute_daily_premium_discount and compute_h4_premium_discount,
-    not compute_*_structures. Every key in _STRUCTURE_COLUMNS is always
-    present. A value is None if that column
+    from compute_daily_premium_discount, compute_h4_premium_discount, and
+    compute_h1_premium_discount, not compute_*_structures. Every key in
+    _STRUCTURE_COLUMNS is always present. A value is None if that column
     isn't in df at all (not yet computed) or if the column's own value is
     None (computed, but still undetermined), the caller only ever needs
     to check for None, not care which of those it was.

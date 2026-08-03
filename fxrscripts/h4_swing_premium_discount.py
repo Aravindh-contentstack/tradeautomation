@@ -91,12 +91,14 @@ const TF_CLEANUP_ON_MISMATCH = true;
 
 // Reserved tag color for this script's equilibrium line, read back via
 // bracket access on overrideOptions (dotted access is a type error on
-// the DrawingOverrides union, see fxrscripts/README.md Design 3).
-// Orange, distinct from every trendLine color already in use (white,
-// red, green) and from the internal tier's own tag (cyan, in
-// h4_internal_premium_discount.py), so deleteDrawingByCondition below can
-// never touch a sibling script's drawing.
-const EQ_LINE_COLOR = color.rgba(255, 165, 0, 1);
+// the DrawingOverrides union, see fxrscripts/README.md Design 3). Coral,
+// distinct from every trendLine color already in use (white, red,
+// green) and from every OTHER premium/discount script's own tag: the
+// internal-tier scripts (cyan/azure/turquoise) AND the swing-tier
+// scripts on the other two timeframes (daily_swing's orange,
+// h1_swing's gold), so deleteDrawingByCondition below can never touch
+// a sibling script's drawing, on this timeframe or another.
+const EQ_LINE_COLOR = color.rgba(255, 140, 105, 1);
 const EQ_LINE_WIDTH = 1;
 
 let h4SwingSwingHigh = NaN;

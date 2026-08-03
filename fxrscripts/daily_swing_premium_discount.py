@@ -9,7 +9,7 @@
 //
 // Python is the source of truth: swing_structure/current_range.py's
 // compute_current_range feeds swing_structure/premium_discount.py's
-// compute_premium_discount for the h4_swing tier. If this ever disagrees
+// compute_premium_discount for the daily_swing tier. If this ever disagrees
 // with the Python for the same candles, fix the Python first, then
 // re-port.
 //
@@ -64,7 +64,7 @@ const FRACTAL_TIE_TOLERANCE = 4;
 // TIMEFRAME ISOLATION. This block is duplicated VERBATIM (bar the two
 // constants) in all nine structure scripts: daily_swing_structure.py,
 // daily_internal_structure.py, daily_fractal_structure.py,
-// daily_fractal_structure.py, daily_internal_structure.py, daily_swing_structure.py,
+// h4_fractal_structure.py, h4_internal_structure.py, h4_swing_structure.py,
 // h1_fractal_structure.py, h1_internal_structure.py, h1_swing_structure.py.
 // FXR Script has no import mechanism, so a change here has to be applied
 // to all nine (plus this one and its internal-tier sibling) by hand.
@@ -93,9 +93,11 @@ const TF_CLEANUP_ON_MISMATCH = true;
 // bracket access on overrideOptions (dotted access is a type error on
 // the DrawingOverrides union, see fxrscripts/README.md Design 3).
 // Orange, distinct from every trendLine color already in use (white,
-// red, green) and from the internal tier's own tag (cyan, in
-// daily_internal_premium_discount.py), so deleteDrawingByCondition below can
-// never touch a sibling script's drawing.
+// red, green) and from every OTHER premium/discount script's own tag:
+// the internal-tier scripts (cyan/azure/turquoise) AND the swing-tier
+// scripts on the other two timeframes (h4_swing's coral, h1_swing's
+// gold), so deleteDrawingByCondition below can never touch a sibling
+// script's drawing, on this timeframe or another.
 const EQ_LINE_COLOR = color.rgba(255, 165, 0, 1);
 const EQ_LINE_WIDTH = 1;
 
@@ -262,7 +264,7 @@ onTick = (length, _moment, _, ta, inputs) => {
   }
 
   if (inferredSpacing !== MY_TIMEFRAME_MS) {
-    // Not our chart. This is what keeps Daily markings off the Daily chart.
+    // Not our chart. This is what keeps Daily markings off other timeframes' charts.
     if (TF_CLEANUP_ON_MISMATCH) {
       // Deletes only THIS script's own trendLines (matched on linewidth,
       // shared with daily_swing_structure.py's tag) and this script's own
