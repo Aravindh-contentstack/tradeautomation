@@ -45,15 +45,24 @@ def main():
             (~order_blocks["mitigated"]).sum(),
         )
     )
+    print(
+        "  caused_displacement: %d   caused_imbalance: %d"
+        % (
+            order_blocks["caused_displacement"].sum(),
+            order_blocks["caused_imbalance"].sum(),
+        )
+    )
     print()
 
-    header = "%-10s | %-12s | %-8s | %-8s | %-22s | %-12s | %-12s" % (
+    header = "%-10s | %-12s | %-8s | %-8s | %-10s | %-22s | %-4s | %-4s | %-12s" % (
         "direction",
         "formed",
         "top",
         "bottom",
+        "primary",
         "trigger_tier",
-        "trigger_date",
+        "disp",
+        "imb",
         "mitigated_at",
     )
     print(header)
@@ -63,14 +72,16 @@ def main():
             ob["mitigated_date"].strftime("%Y-%m-%d") if ob["mitigated"] else "-"
         )
         print(
-            "%-10s | %-12s | %-8.2f | %-8.2f | %-22s | %-12s | %-12s"
+            "%-10s | %-12s | %-8.2f | %-8.2f | %-10s | %-22s | %-4s | %-4s | %-12s"
             % (
                 ob["direction"],
                 ob["formed_date"].strftime("%Y-%m-%d"),
                 ob["top"],
                 ob["bottom"],
+                ob["primary_tier"],
                 ",".join(ob["trigger_tier"]),
-                ob["trigger_date"].strftime("%Y-%m-%d"),
+                "yes" if ob["caused_displacement"] else "no",
+                "yes" if ob["caused_imbalance"] else "no",
                 mitigated_at,
             )
         )

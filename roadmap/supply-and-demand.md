@@ -13,16 +13,21 @@ sub-factors below.
 Worked out across several reference scripts in `temp-reference/order-blocks/`
 plus direct discussion with the user about how they trade this manually. Full
 walkthrough of the external reference scripts themselves is in
-`temp-reference/order-blocks/fluxCharts-logic-notes.md` and
-`temp-reference/order-blocks/sonarLab-logic-notes.md`. This section is
+`temp-reference/order-blocks/fluxCharts-logic-notes.md`,
+`temp-reference/order-blocks/sonarLab-logic-notes.md`, and
+`temp-reference/order-blocks/tflab-logic-notes.md`. This section is
 specifically the confirmed rules for OUR implementation.
 
-**Candle selection: CONFIRMED.** An ATR-based leg scan, not a color scan and
-not the single-most-extreme-candle idea:
+**Candle selection: CONFIRMED, IMPLEMENTED 2026-08-05** (`swing_structure/
+order_blocks.py`). An ATR-based leg scan, not a color scan and not the
+single-most-extreme-candle idea:
 - For the leg relevant to a given tier's break (the span from that tier's own
   pivot to its break candle), scan for the "displacement candle": the first
-  candle whose range is unusually large relative to ATR (exact multiple TBD,
-  same size measure used for the large-candle/large-OB ideas below).
+  candle whose range exceeds **1.0x ATR** (resolved, same multiple as the
+  zone-shaping "high" tier below, one consistent meaning of "unusually
+  large" everywhere). If no candle in the leg qualifies, the **break candle
+  itself becomes the fallback displacement point**, so a break never fails
+  to produce an OB for want of a standout candle.
 - The OB anchor is the candle **immediately before** that displacement
   candle. Its color is irrelevant, unlike the old last-opposite-color
   approach.
@@ -37,7 +42,7 @@ not the single-most-extreme-candle idea:
   velocity instead of trade size as the signal for "real institutional
   footprint."
 
-**`caused_displacement` (confirmed, and decoupled from candle selection).**
+**`caused_displacement` (confirmed, IMPLEMENTED 2026-08-05).**
 A separate, subsequent boolean check on an already-identified OB, not part of
 finding the anchor itself. Strict version for now (relax later if needed):
 the candle immediately after the anchor must have its body **close** past
@@ -105,20 +110,73 @@ back an unmitigated OB can be and still be considered live, versus being
 treated as stale/obsolete purely due to age. Value and exact definition
 deferred to a later session.
 
-**Large candle / large OB sizing (two related ideas, both TBD, likely share
-one size measure, same measure as the ATR-based candle selection above).**
-- When forming a zone from an anchor candle that's unusually large, trim the
-  wick on the side that ISN'T the important edge, down to the candle's body:
-  for a supply (bearish) OB, keep the full high-side wick, trim the low
-  side to the body. For a demand (bullish) OB, keep the full low-side wick,
-  trim the high side to the body. Only applies when the candle counts as
-  "large."
-- Rule 3's "large OB" criterion (which zones are big enough for the
-  attrition rule to apply) needs its own threshold too.
-- Decide the exact ATR multiple(s) together once we get here, but all of
-  these (candle selection, displacement, wick trim, large-OB attrition)
-  should share one consistent ATR-relative size measure rather than several
-  inconsistent ones.
+**`caused_imbalance` (confirmed and IMPLEMENTED 2026-08-05).** A plain 3-candle FVG check
+anchored directly on the OB, no distance search like `newphewSam.py`'s
+`fvgDistance` window. For anchor candle `i`, check for a gap between `i` and
+`i+2` (skipping `i+1`): for a bullish/demand OB, `caused_imbalance = True` if
+row `i+2`'s low sits above row `i`'s high (a genuine gap, nothing traded in
+between). For a bearish/supply OB, the mirror: row `i+2`'s high sits below
+row `i`'s low. Deliberately NOT requiring `i+1`'s close to also confirm the
+gap (unlike `newphewSam.py`'s `bullishImb`/`bearishImb`, which do), the plain
+gap is enough. Same 3-candle window (`i`, `i+1`, `i+2`) as
+`caused_displacement` above, the two checks just test different things:
+displacement asks whether `i+1` alone closed past the anchor, imbalance asks
+whether the gap reaches all the way out to `i+2`.
+
+### Candle sizing and zone shaping (confirmed and IMPLEMENTED 2026-08-05)
+
+Once the ATR-displacement method (above) has picked the anchor candle, a
+separate step decides the anchor's actual `top`/`bottom` values, since the
+raw anchor candle's own wick-to-wick range isn't always the right zone.
+Worked out against `tflab.py`'s "Order Block Refine" feature (see
+`temp-reference/order-blocks/tflab-logic-notes.md`), but replacing its
+bespoke large-candle neighbor-blending logic with the user's own manual
+rules. Three ATR-relative bands, using the anchor candle's own range
+(`high - low`) against the SAME ATR series computed for candle selection,
+but a DIFFERENT threshold comparison, a separate step from finding the
+anchor, not part of it:
+
+- **Low** (anchor's range < 0.5x ATR, "too small to use as-is"): don't use
+  the candle alone. Try combining it with a neighbor, checked in this exact
+  order, stop at the first success:
+  1. `[i, i+1]` (forward: the anchor plus the next candle). If this combined
+     range (highest high to lowest low across both candles) lands in
+     **medium**, use it, full wick to wick, done. Never check backward or
+     the 3-candle combo.
+  2. Otherwise, `[i-1, i]` (backward: the anchor plus the previous candle).
+     If medium, use it, full wick to wick, done. Never check the 3-candle
+     combo.
+  3. If NEITHER 2-candle attempt was medium: if BOTH landed in **high**,
+     skip the 3-candle combo entirely (adding a third candle can only keep
+     the range the same size or grow it, never shrink it back down, so
+     trying it when already-too-big can't help) and just take the forward
+     `[i, i+1]` result. Otherwise (at least one of the two was still low),
+     try `[i-1, i, i+1]` and accept whatever band it lands in, medium, high,
+     or even still low, no further fallback, and never extend past 3
+     candles.
+  - Forward is preferred over backward for two reasons: (1) `caused_imbalance`
+    checks the gap between `i` and `i+2`, extending forward to include `i+1`
+    pushes the zone's far edge closer to that gap instead of leaving it
+    sitting apart from the marked zone. (2) A small, un-extended or
+    backward-only zone often just gets its gap filled and price pushes away
+    without ever coming back to trade it, extending forward produces a
+    bigger, more realistically tradeable zone.
+  - Whenever a merged/combined range is used (whether it lands in medium or
+    high), take the full wick-to-wick range, never trim it. Trimming (below)
+    only ever applies to a single, un-merged candle.
+- **Medium** (0.5x to 1x ATR): use the candle's full range, wick to wick, no
+  trim.
+- **High** (> 1x ATR): trim. Keep the far/important wick, strip only the
+  near/unimportant wick down to the candle's body: for a supply (bearish) OB,
+  keep the full high-side wick, trim the low side to the body. For a demand
+  (bullish) OB, keep the full low-side wick, trim the high side to the body.
+
+This is separate from (but likely shares its 0.5x/1x ATR band boundaries
+with) invalidation rule 3's still-open "large OB" criterion above, that one
+is about whether the OVERALL zone is big enough for the multi-touch
+attrition rule to apply, not about shaping a single anchor candle. Decide
+whether they actually share one threshold or need their own when rule 3 gets
+built.
 
 **Cluster avoidance / merging nearby OBs (confirmed 2026-08-04).** Two
 different situations, handled differently, do NOT treat them the same:
@@ -141,13 +199,15 @@ different situations, handled differently, do NOT treat them the same:
 
 Stages, in build order:
 
-1. **OB identification.** Detect OB anchor candles off existing tier break
-   events (`{tf}_{swing,internal,fractal}_high_event`/`low_event` == "break of
-   swing high/low"), then apply the confirmed ATR-based candle-selection rule
-   above (not the color-scan currently in `order_blocks.py`, that needs
-   updating). Classify direction, record formation index/date, zone
-   top/bottom, triggering tier(s), merging same-anchor multi-tier triggers
-   per the cluster-avoidance rule above.
+1. **OB identification. IMPLEMENTED 2026-08-05.** Detect OB anchor candles
+   off existing tier break events (`{tf}_{swing,internal,fractal}_high_event`
+   /`low_event` == "break of swing high/low"), apply the ATR-based candle-
+   selection rule to find the anchor, then the "Candle sizing and zone
+   shaping" rules to turn that anchor into the actual `top`/`bottom`.
+   Classify direction, record formation index/date, zone top/bottom,
+   triggering tier(s), merging same-anchor multi-tier triggers per the
+   cluster-avoidance rule above (`primary_tier`, `trigger_tier`). See
+   `swing_structure/order_blocks.py`.
 2. **Mitigation and invalidation state.** Implement the confirmed rules
    above: `mitigated`/`mitigated_index`/`mitigated_date` (simple, already
    built), plus a new `invalidated`/`invalidated_index`/`invalidated_date`
@@ -164,10 +224,8 @@ Stages, in build order:
    the farther one instead. This is exactly why the two are never merged
    (see cluster avoidance above), the detection depends on keeping them as
    separate rows.
-5. **`caused-imbalance` / `caused-displacement`.** `caused_displacement`'s
-   exact rule is now confirmed, see "OB lifecycle" above. `caused-imbalance`
-   (FVG) still open, likely a similar-shaped check, worked out when we get
-   here.
+5. **`caused-imbalance` / `caused-displacement`. IMPLEMENTED 2026-08-05.**
+   Both rules confirmed and implemented, see "OB lifecycle" above.
 6. **`flipzone`** (future). Definition already confirmed, see
    `temp-reference/order-blocks/fluxCharts-logic-notes.md` section 5: a
    failed OB (invalidated per the rules above) produces a NEW, separate OB in
@@ -201,14 +259,21 @@ decide when we design Target OB selection properly.
 
 ### Next Items
 
-- Update `order_blocks.py`'s candle selection from the color-scan to the
-  confirmed ATR-based displacement-candle method.
-- Implement the same-anchor-multi-tier merge (with largest-tier naming), and
-  make sure different-anchor overlapping OBs are explicitly NOT merged.
+Candle selection, zone shaping, same-anchor merging, `caused_displacement`,
+and `caused_imbalance` are all implemented as of 2026-08-05
+(`swing_structure/order_blocks.py`, `atr_period=14`, the project's existing
+default). What's left:
+
+- Validate identified OBs against a real chart (TradingView/FX Replay)
+  before moving on to the Swept Liquidity sub-factors. Not yet done, the
+  demo script (`scripts/demo_order_blocks.py`) only smoke-tests that the
+  logic runs sanely on synthetic data.
 - Add `invalidated`/`invalidated_index`/`invalidated_date` alongside the
   existing `mitigated` fields, covering rule 1 (full break-through) first,
   rules 2/3 once their open TBDs (touch count N, large-OB threshold, 3a/3b
   unification) are settled.
-- Implement `caused_displacement` per the confirmed rule above.
-- Validate identified OBs against a real chart (TradingView/FX Replay) before
-  moving on to the Swept Liquidity sub-factors.
+- Decide whether the "large OB" criterion for invalidation rule 3 shares the
+  same 0.5x/1x ATR bands as zone shaping, or needs its own threshold.
+- Port to 4H/H1 (the wrappers already exist, `compute_h4_order_blocks`/
+  `compute_h1_order_blocks`, but only Daily has been run against real data
+  even in the synthetic smoke test).
