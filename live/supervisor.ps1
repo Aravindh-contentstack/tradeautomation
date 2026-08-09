@@ -24,7 +24,11 @@ function Start-Bot {
     # via `Get-Content -Tail 20 -Wait` on these files.
     $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
     Write-Output "$(Get-Date): starting live/run_live.py (log: bot_$stamp.log)"
-    Start-Process -FilePath "python" -ArgumentList "live\run_live.py" -WorkingDirectory $RepoPath -PassThru -WindowStyle Hidden `
+    # "-u" forces Python's stdout/stderr to be unbuffered. Without it, Python
+    # fully buffers output whenever it's not talking to a real console (e.g.
+    # redirected to a file here), so print() calls sit invisible in a buffer
+    # instead of reaching the log file in real time.
+    Start-Process -FilePath "python" -ArgumentList "-u", "live\run_live.py" -WorkingDirectory $RepoPath -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $LogDir "bot_$stamp.log") `
         -RedirectStandardError (Join-Path $LogDir "bot_$stamp.err.log")
 }
