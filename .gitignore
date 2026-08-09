@@ -3,5 +3,6 @@ __pycache__/
 data/raw/*.parquet
 live/state/*.json
 live/PAUSE
+live/logs/
 .env
 *.pem

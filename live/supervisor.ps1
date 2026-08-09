@@ -14,10 +14,19 @@ $RepoPath = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoPath
 
 $CheckIntervalSeconds = 300
+$LogDir = Join-Path $RepoPath "live\logs"
+New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
 function Start-Bot {
-    Write-Output "$(Get-Date): starting live/run_live.py"
-    Start-Process -FilePath "python" -ArgumentList "live\run_live.py" -WorkingDirectory $RepoPath -PassThru -WindowStyle Hidden
+    # Runs hidden (no console window pops up), but stdout/stderr are
+    # redirected to files instead of vanishing, so what the bot is doing -
+    # settings loaded, signals found, orders placed, errors - stays visible
+    # via `Get-Content -Tail 20 -Wait` on these files.
+    $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    Write-Output "$(Get-Date): starting live/run_live.py (log: bot_$stamp.log)"
+    Start-Process -FilePath "python" -ArgumentList "live\run_live.py" -WorkingDirectory $RepoPath -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $LogDir "bot_$stamp.log") `
+        -RedirectStandardError (Join-Path $LogDir "bot_$stamp.err.log")
 }
 
 $BotProcess = Start-Bot
