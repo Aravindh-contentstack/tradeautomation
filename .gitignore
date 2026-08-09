@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 data/raw/*.parquet
+live/state/*.json
+live/PAUSE
+.env
+*.pem
