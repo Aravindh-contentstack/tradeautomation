@@ -43,7 +43,7 @@ sys.path.insert(0, ".")
 
 from backtest.instruments import pip_size_for
 from backtest.killzone import next_london_cutoff
-from backtest.pipeline import build_pipeline_from_frames
+from backtest.pipeline import build_live_context
 from backtest.settings import is_taken, load_settings
 from backtest.simulate import find_signals, tp_price_for
 from backtest.weights import load_weights
@@ -211,14 +211,18 @@ def run_once(state, settings, weights):
     h4_df = connector.fetch_closed_candles(MT5_SYMBOL, "H4", H4_HISTORY_COUNT)
     h1_df = connector.fetch_closed_candles(MT5_SYMBOL, "H1", H1_HISTORY_COUNT)
 
-    merged = build_pipeline_from_frames(daily_df, h4_df, h1_df)
-    latest_candle_time = merged["date"].iloc[-1]
+    # A full context, not a tail slice of the frame. Order-block positions
+    # address the whole history, so slicing the frame afterwards would
+    # mis-address every zone; build_live_context cuts the frame and rebases
+    # the OB universe together.
+    ctx = build_live_context(daily_df, h4_df, h1_df, PIP_SIZE)
+    latest_candle_time = ctx.df["date"].iloc[-1]
 
     if not safety.is_new_candle(state, latest_candle_time):
         return state
     safety.mark_candle_processed(state, latest_candle_time)
 
-    signals = find_signals(merged.tail(5), weights)
+    signals = find_signals(ctx, weights, PIP_SIZE)
     new_signals = [s for s in signals if s["entry_time"] == latest_candle_time]
     if not new_signals:
         return state
@@ -253,7 +257,7 @@ def run_once(state, settings, weights):
         return state
 
     result = connector.send_market_order(
-        MT5_SYMBOL, signal["direction"], lots, signal["sl"], tp, magic=MAGIC, comment="algo-h1-fractal"
+        MT5_SYMBOL, signal["direction"], lots, signal["sl"], tp, magic=MAGIC, comment="algo-h1-ob"
     )
     if not result["success"]:
         alerts.send(

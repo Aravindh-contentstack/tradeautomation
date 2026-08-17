@@ -40,7 +40,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from swing_structure.h1_structure import (  # noqa: E402
+from smc.market_structure.h1_structure import (  # noqa: E402
     H1_TIER_PERIODS,
     compute_h1_structures,
 )

@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from demo_swing_structure import build_synthetic_data
-from swing_structure.current_structure import get_current_structure
-from swing_structure.daily_structure import compute_daily_structures
+from smc.market_structure.current_structure import get_current_structure
+from smc.market_structure.daily_structure import compute_daily_structures
 
 
 def main():

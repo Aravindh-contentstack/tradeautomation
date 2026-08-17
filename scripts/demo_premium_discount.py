@@ -18,9 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from demo_h4_structure import build_synthetic_h4_data
-from swing_structure.h4_structure import compute_h4_structures
-from swing_structure.premium_discount import compute_h4_premium_discount, h4_zone_column_names
-from swing_structure.current_structure import get_current_structure
+from smc.market_structure.h4_structure import compute_h4_structures
+from smc.market_structure.premium_discount import compute_h4_premium_discount, h4_zone_column_names
+from smc.market_structure.current_structure import get_current_structure
 
 TIERS = ("h4_swing", "h4_internal")
 

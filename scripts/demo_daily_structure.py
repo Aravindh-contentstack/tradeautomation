@@ -42,7 +42,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from swing_structure.daily_structure import (  # noqa: E402
+from smc.market_structure.daily_structure import (  # noqa: E402
     DAILY_TIER_PERIODS,
     compute_daily_structures,
 )

@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from swing_structure.detector import compute_daily_swing_structure
+from smc.market_structure.detector import compute_daily_swing_structure
 
 
 # A repeating pattern of small body deltas used to build "ranging" days

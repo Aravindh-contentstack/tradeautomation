@@ -52,10 +52,13 @@ an open-ended extension.
 
 import pandas as pd
 
+from smc.order_blocks.ob_state import slice_universe
+
 from backtest.context import build_market_context
 from backtest.settings import apply_settings
 from backtest.simulate import apply_tp, find_signals, simulate_trade
 from backtest.journal import build_row
+from backtest.target_log import collect_target_log, trade_id_for
 from backtest.weights import update_weights
 
 DEFAULT_WALK_TAIL = pd.Timedelta(days=7)
@@ -93,7 +96,8 @@ def _window(frame, start, end):
 
 
 def run_year(df, year, *, pip_size, frozen_weights, settings,
-             m15_df=None, tp_levels=None, walk_tail=DEFAULT_WALK_TAIL):
+             m15_df=None, tp_levels=None, walk_tail=DEFAULT_WALK_TAIL,
+             obs=None, log_targets=False, instrument=None):
     """Simulates and journals EVERY gate-passing candidate of `year`.
 
     df is the full instrument pipeline frame (backtest/pipeline.py). settings
@@ -101,8 +105,19 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
     backtest/settings.py::load_settings); it decides `taken` and the TP
     multiple, and it is stamped onto every row as an audit trail.
 
+    obs is the FULL-HISTORY ObUniverse from the same bundle as df, rebased
+    here onto this year's walk window. It is computed once per instrument
+    rather than per year, so it is passed in whole and sliced, never
+    recomputed (see backtest/pipeline.py's docstring for why per-window
+    computation would be wrong).
+
     Returns (learning_weights, rows). rows are journal-ready dicts, each still
     carrying "factor_results", which save_journal strips on the way to CSV.
+
+    log_targets adds a third return value, the per-bar Target OB record
+    (backtest/target_log.py). It is off by default: it changes no result
+    and costs a factor evaluation per bar of every candidate's life.
+    `instrument` only labels those rows and is unused otherwise.
 
     Untaken candidates are simulated and journalled exactly like taken ones.
     Only their `taken` flag differs, and only P&L reporting reads it. Filtering
@@ -118,17 +133,31 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
     if walk_df is None:
         return learning_weights, []
 
+    # The window's offset into full history comes from the explicit
+    # h1_index column, never from re-deriving a position by timestamp:
+    # walk_df has already been reset_index'ed and its own index says
+    # nothing about where it sits in the instrument's history.
+    window_obs = None
+    if obs is not None and "h1_index" in walk_df.columns:
+        window_start = int(walk_df["h1_index"].iloc[0])
+        window_obs = slice_universe(
+            obs, window_start, window_start + len(walk_df)
+        )
+
     ctx = build_market_context(
-        walk_df, pip_size, m15_df=_window(m15_df, start, end + tail)
+        walk_df,
+        pip_size,
+        m15_df=_window(m15_df, start, end + tail),
+        obs=window_obs,
     )
 
     # find_signals runs over the whole walk frame and the tail's signals are
     # dropped afterwards, rather than the frame being pre-trimmed, because a
     # signal's `idx` is a positional index into ctx. Trimming the frame first
     # would mis-address every bar. The cost is nil: find_signals only iterates
-    # fractal-break rows, of which the tail holds a handful.
+    # the handful of OB-mitigation bars, of which the tail holds a few.
     signals = [
-        s for s in find_signals(ctx, frozen_weights) if s["entry_time"] < end
+        s for s in find_signals(ctx, frozen_weights, pip_size) if s["entry_time"] < end
     ]
     apply_settings(signals, settings, pip_size)
 
@@ -141,7 +170,26 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
         levels = list(tp_levels)
 
     rows = []
+    target_rows = []
     for signal in signals:
+        # The live recheck is trade MANAGEMENT: it only makes sense for a
+        # trade actually placed. A rejected candidate is walked purely so
+        # its real, un-managed outcome can teach the weight table
+        # something (see the ratchet-trap note above); recomputing its
+        # probability against this year's threshold would move nearly
+        # every one of them to breakeven within its first bar (a rejected
+        # candidate's score rarely climbs back above the very bar it just
+        # failed), which is exactly the narrow, taken-trades-only sample
+        # the "simulate every candidate" design exists to avoid.
+        if signal["taken"]:
+            recheck_kwargs = dict(
+                weights=frozen_weights,
+                threshold=settings.get("threshold"),
+                mitigation_factor_results=signal["mitigation_factor_results"],
+            )
+        else:
+            recheck_kwargs = {}
+
         walk = simulate_trade(
             ctx,
             signal["idx"],
@@ -150,6 +198,7 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
             signal["sl"],
             signal["r_distance"],
             tp_levels=levels,
+            **recheck_kwargs,
         )
         tp_result = apply_tp(
             walk,
@@ -163,6 +212,13 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
         row["factor_results"] = signal["factor_results"]
         rows.append(row)
 
+        if log_targets:
+            target_rows.extend(
+                collect_target_log(
+                    ctx, signal, walk, trade_id_for(instrument or "", signal)
+                )
+            )
+
         # ALL candidates, taken or not. update_weights leaves the table
         # completely untouched on a 0R breakeven (user decision), so no branch
         # is needed here.
@@ -170,6 +226,8 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
             learning_weights, signal["factor_results"], tp_result["realised_r"]
         )
 
+    if log_targets:
+        return learning_weights, rows, target_rows
     return learning_weights, rows
 
 

@@ -1,0 +1,10 @@
+{
+  "applied": {
+    "threshold": 40,
+    "tp_multiple": 4.0,
+    "max_sl_size_pips": 4996.0
+  },
+  "recommended": null,
+  "candidate_count": 40,
+  "taken_count": 3
+}

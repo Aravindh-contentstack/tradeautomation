@@ -18,9 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from demo_daily_structure import build_synthetic_daily_data
-from swing_structure.daily_structure import compute_daily_structures
-from swing_structure.premium_discount import compute_daily_premium_discount, daily_zone_column_names
-from swing_structure.current_structure import get_current_structure
+from smc.market_structure.daily_structure import compute_daily_structures
+from smc.market_structure.premium_discount import compute_daily_premium_discount, daily_zone_column_names
+from smc.market_structure.current_structure import get_current_structure
 
 TIERS = ("daily_swing", "daily_internal")
 

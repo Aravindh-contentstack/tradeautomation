@@ -1,3 +1,4 @@
 pandas
 dukascopy-python
 pyarrow
+pytest

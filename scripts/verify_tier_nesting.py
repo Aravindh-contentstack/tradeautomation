@@ -38,23 +38,23 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from demo_daily_structure import build_synthetic_daily_data  # noqa: E402
 from demo_h1_structure import build_synthetic_h1_data  # noqa: E402
 from demo_h4_structure import build_synthetic_h4_data  # noqa: E402
-from swing_structure.daily_structure import (  # noqa: E402
+from smc.market_structure.daily_structure import (  # noqa: E402
     DAILY_TIER_PERIODS,
     compute_daily_structures,
 )
-from swing_structure.fractal_detector import (  # noqa: E402
+from smc.market_structure.fractal_detector import (  # noqa: E402
     _is_down_fractal,
     _is_up_fractal,
 )
-from swing_structure.h1_structure import (  # noqa: E402
+from smc.market_structure.h1_structure import (  # noqa: E402
     H1_TIER_PERIODS,
     compute_h1_structures,
 )
-from swing_structure.h4_structure import (  # noqa: E402
+from smc.market_structure.h4_structure import (  # noqa: E402
     H4_TIER_PERIODS,
     compute_h4_structures,
 )
-from swing_structure.tiered_fractal_structure import (  # noqa: E402
+from smc.market_structure.tiered_fractal_structure import (  # noqa: E402
     compute_tier_structure,
     tier_column_names,
 )
@@ -299,7 +299,7 @@ def verify_wrapper_parity():
     print("Wrapper parity against the existing Daily fractal tier")
 
     from demo_swing_structure import build_synthetic_data
-    from swing_structure.fractal_structure import compute_fractal_structure
+    from smc.market_structure.fractal_structure import compute_fractal_structure
 
     daily, manual_restart, _hold = build_synthetic_data()
     ohlc = daily[OHLC]

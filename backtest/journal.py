@@ -38,6 +38,8 @@ JOURNAL_COLUMNS = [
     "terminal_r",
     "terminal_reason",
     "be_moved",
+    "be_trigger",
+    "be_probability",
     "checkpoints",
     "bars_held",
     "trade_duration",
@@ -46,6 +48,19 @@ JOURNAL_COLUMNS = [
     "applied_threshold",
     "applied_max_sl_pips",
     "applied_tp_multiple",
+    # What triggered the trade. The zone's own geometry is journalled
+    # because a stop derived from it is only auditable alongside it, and
+    # ob_touch_no distinguishes a first tap from a third (a zone's last
+    # chance before it dies).
+    "mitigation_time",
+    "entry_deferred",
+    "ob_top",
+    "ob_bottom",
+    "ob_touch_no",
+    # Which gates had nothing to say. Without this the probability cannot
+    # be read after the fact: 100% of ten factors and 100% of seventy look
+    # identical in the CSV, and they are not the same trade.
+    "excluded_gates",
 ]
 
 
@@ -67,7 +82,14 @@ def build_row(signal, walk, tp_result, settings):
 
     Reads from `walk` (see simulate.simulate_trade): terminal_r,
     terminal_reason, terminal_time, terminal_idx, terminal_price,
-    max_r_reached, be_moved, checkpoints, sl_excursion_pips.
+    max_r_reached, be_moved, be_trigger, be_probability, checkpoints,
+    sl_excursion_pips.
+
+    be_trigger records which rule moved the stop to breakeven -- the
+    19:00 checkpoint or the mid-trade probability recheck -- and
+    be_probability the live score at that moment for the latter. Both are
+    None when the trade never moved to breakeven, or when the caller ran
+    simulate_trade without the live-recheck parameters.
 
     Reads from `tp_result` (see simulate.apply_tp): realised_r, plus
     exit_reason / exit_price / exit_time / exit_idx, which differ from the
@@ -116,6 +138,8 @@ def build_row(signal, walk, tp_result, settings):
         "terminal_r": walk["terminal_r"],
         "terminal_reason": walk["terminal_reason"],
         "be_moved": walk["be_moved"],
+        "be_trigger": walk.get("be_trigger"),
+        "be_probability": walk.get("be_probability"),
         "checkpoints": walk["checkpoints"],
         "bars_held": bars_held,
         "trade_duration": exit_time - entry_time if exit_time is not None else None,
@@ -124,6 +148,14 @@ def build_row(signal, walk, tp_result, settings):
         "applied_threshold": settings.get("threshold"),
         "applied_max_sl_pips": settings.get("max_sl_size_pips"),
         "applied_tp_multiple": settings.get("tp_multiple"),
+        "mitigation_time": signal.get("mitigation_time"),
+        "entry_deferred": signal.get("entry_deferred"),
+        "ob_top": signal.get("ob_top"),
+        "ob_bottom": signal.get("ob_bottom"),
+        "ob_touch_no": signal.get("ob_touch_no"),
+        # Semicolon-joined rather than a list, so the CSV round-trips as a
+        # plain string instead of a repr that has to be eval'ed back.
+        "excluded_gates": ";".join(signal.get("excluded_gates", ())),
     }
 
 

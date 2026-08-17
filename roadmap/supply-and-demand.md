@@ -64,43 +64,56 @@ already does, no change needed there. The same-timeframe constraint is
 already true by construction, since `compute_order_blocks` only ever reads
 one timeframe's OHLC rows at a time.
 
-**Invalidation (confirmed, separate concept from mitigation).** An OB can
-still be "mitigated" and remain tradeable, it only stops being tradeable once
-invalidated. Three distinct ways this happens:
+**Invalidation (CONFIRMED and IMPLEMENTED 2026-08-13, `smc/order_blocks/
+order_blocks.py`'s `_apply_touch_lifecycle`).** An OB can be "mitigated" and
+remain tradeable, it only stops being tradeable once invalidated. The whole
+model rests on one idea: an OB is a block of resting orders, and it can only
+produce a reaction while enough of them are left. Every rule below is a way
+of saying "they are used up now".
 
-1. **Full break-through.** Price's wick (no close required) pushes all the
-   way past the OB's far side (below the bottom for a demand/bullish OB,
-   above the top for a supply/bearish OB).
-2. **Superseded by a fresh structure born from mitigating THIS OB.** Price
-   wicks the OB (mitigates it, even shallowly), bounces, and that bounce is
-   strong enough to cause a genuinely NEW structural break (a fresh
-   fractal/internal/swing pivot break) on the way away from the OB. That new
-   break both forms a brand new OB from the reaction candle AND invalidates
-   this old one. Important: this ONLY applies if the OB was actually touched
-   first. If price never touches an OB and instead breaks structure some
-   other way (e.g. by sweeping a different liquidity pool sitting elsewhere
-   in the range, a concept for `roadmap/liquidity.md`), the untouched OB is
-   NOT invalidated. It stays live and could be mitigated at any arbitrary
-   point in the future. See "Lookback period" below for why this needs a
-   bound.
-3. **Death by attrition, large OBs only (Daily-scale, primarily).** For
-   zones big enough that price can chop around inside them for a while
-   without cleanly triggering rule 1 or rule 2. Two flavors described by the
-   user, possibly (UNCONFIRMED) two faces of one shared mechanism: track the
-   deepest touch reached so far, and the OB dies the moment EITHER (a) a
-   touch finally crosses past the EQ, OR (b) the touch count hits some limit
-   N without ever crossing the EQ.
-   - **3a**: touches get progressively deeper each time (first touch stays
-     above the EQ, reacts, second touch gets closer to the EQ without
-     crossing it, reacts again, a later touch finally crosses past the EQ).
-     That crossing is what makes it "completely mitigated" and dead. A wick
-     touch to the EQ is enough, no close required.
-   - **3b**: price touches the same OB repeatedly without ever getting near
-     the EQ. After enough repeats (count TBD), also dead.
-   - Open, TBD later: whether 3a/3b really are one shared countdown
-     mechanism or two independent rules, the exact touch count N for 3b, and
-     whether this rule matters for 4H/H1 at all or whether rules 1/2 always
-     resolve things first there in practice (also unconfirmed).
+Three rules, whichever fires first:
+
+1. **EQ reached.** A wick touches the OB's own midpoint, `(top + bottom) /
+   2`. No close required. Reaching the EQ means the majority of the resting
+   orders have been absorbed in one go.
+   - This SUBSUMES the previously-listed "full break-through" rule, which is
+     no longer a separate case: a wick that pushes past the far edge has
+     necessarily crossed the midpoint on the way, so the EQ rule always
+     fires first. Confirmed with the user 2026-08-13.
+2. **Third qualifying touch.** Touch N+1 only qualifies if it penetrates
+   DEEPER than touch N (a lower low for a demand OB, a higher high for a
+   supply OB). A shallower re-tap reaches no orders the earlier one did not
+   already absorb, so it does not advance the count. After three qualifying
+   touches the block is treated as spent: with few orders left there is no
+   reason to expect a strong reaction, and price can pass through at any
+   time. A multi-bar stay inside the zone counts as ONE touch.
+   - This replaces the old rules 3a/3b, which are now confirmed to be one
+     shared countdown rather than two mechanisms, with N = 3.
+3. **Structure break away from a touched zone.** The OB was touched at least
+   once and price then broke structure (any of that timeframe's three tiers)
+   in the direction AWAY from the zone. Direction matters: a down-break is
+   price coming into a demand zone, which is the setup rather than its
+   failure.
+   - Still only applies if the OB was actually touched first. If price never
+     touches an OB and instead breaks structure some other way (for example
+     by sweeping a different liquidity pool elsewhere in the range, a
+     concept for `roadmap/liquidity.md`), the untouched OB is NOT
+     invalidated. It stays live and could be mitigated at any arbitrary
+     point in the future. See "Lookback period" below for why this needs a
+     bound.
+   - Implemented as the weaker TEMPORAL version of the original rule: the
+     break must come after a touch, but there is no test that the bounce
+     CAUSED the break, since causation is not cleanly testable.
+
+**The zone is still tradeable ON the candle that kills it (confirmed
+2026-08-13).** Both the EQ rule and the third-touch rule fire on a candle
+that also produces a valid signal, and the OB only dies from the NEXT candle
+onward. This is not a rounding decision, it is the point: reaching the EQ is
+exactly the evidence that the orders were absorbed and a reaction is now
+due, so that candle is the highest-conviction entry the zone will ever
+offer. The code keeps the two apart as `invalidated_index` (the candle the
+event happened on) and `invalidated_from_index` (the first dead candle), and
+`ob_state.py`'s `valid_through` carries the rule so no caller re-derives it.
 
 **Lookback period (new concept, TBD, not yet defined).** Because rule 2
 explicitly does NOT invalidate an untouched OB just because the market moved
@@ -237,43 +250,122 @@ Stages, in build order:
 ## Target OB
 
 Reuses the same OB objects as Mitigation OB, just selected as the
-opposite-direction draw target instead of the reaction zone. Same stages as
-Mitigation OB above (Swept Liquidity, Has Inducements, Caused Imbalance,
-Caused Displacement, Flip Zone, cross-timeframe containment), applied with
-Target OB's directional selection logic. That selection logic (which specific
-unmitigated OB becomes "the" target for a given signal) is an Entry-model
-concern (`LC-1`/`LC-2A`/`LC-2B`/`CE` in `roadmap/entry-models.md`), not an
-identification concern, so it's deferred until the Entry-model factors are
-designed.
+opposite-direction draw target instead of the reaction zone. Same
+sub-factors as Mitigation OB above (Swept Liquidity, Has Inducements,
+Caused Imbalance, Caused Displacement, Flip Zone, cross-timeframe
+containment).
 
-**Distance/recency filter (new, TBD, noted 2026-08-04).** An OB can be
-completely valid as an OB (per the lifecycle rules above) while still being a
-bad Target OB candidate, if it sits too far away (e.g. the anchor from deep
-inside a long, uninterrupted 40-candle leg) for price to realistically be
-expected to travel back to it after a reversal. Inspired by
-`sonarLab.py`'s cooldown mechanism (see its logic notes file), repurposed
-here as a target-selection filter rather than an OB-creation-frequency
-control, which is what it does in that script. Exact measure (bars, ATR-
-relative price distance, or relative to the size of the leg/range) TBD,
-decide when we design Target OB selection properly.
+**Selection (CONFIRMED and IMPLEMENTED 2026-08-13, `backtest/factors.py`'s
+`evaluate_ob_target_factors`).** One target per timeframe, matching the
+factor sheet's three separate `OB Target` gates: the NEAREST valid,
+unmitigated, opposite-direction OB on Daily, on 4H, and on H1, each scored
+independently. Nearest-first, so when the near one is invalidated the next
+one out takes over and the same process repeats. This turned out NOT to
+depend on the Entry models, contrary to the earlier note here, so it is no
+longer deferred to `roadmap/entry-models.md`.
+
+**Supporting versus opposing (confirmed 2026-08-13).** A target's qualities
+mean opposite things depending on whether price has arrived yet, and this is
+the core of what distinguishes the two OB roles:
+
+- **Unmitigated (supporting).** The zone is pulling price toward it, which
+  is the direction the trade wants to go. Every quality it has scores YES.
+- **Reached (opposing).** That same strength is now what stops price going
+  further, so every answer is NEGATED. A target with displacement scored YES
+  while unreached and scores NO once reached. The underlying facts about the
+  zone never change, only what they mean for this trade.
+- The negation is symmetric, so a WEAK opposing zone reads as a positive: a
+  target with no displacement, once reached, is unlikely to hold price and
+  scores YES.
+- Mitigation OB polarity is the simple case by contrast: every quality
+  present scores YES, absent scores NO, and those answers FREEZE at entry
+  for the life of the trade.
+
+**Distance filter (CONFIRMED 2026-08-13, closing the TBD noted
+2026-08-04).** An OB can be completely valid per the lifecycle rules while
+still being a bad target if it sits too far away for price to realistically
+reach it. The rule as the user states it is "within 2x the take-profit
+distance", and TP is `tp_multiple x R`, so the radius is **5R**, using the
+spec's 2.5R baseline. Beyond it the whole gate is excluded rather than
+scored.
+
+The multiple is PINNED at 5R rather than read from the live `tp_multiple`,
+deliberately. `tp_multiple` is what the prior year's walk-forward search
+recommended, so feeding it into the probability would make each year's
+scores a function of last year's tuning, which is the ratchet
+`backtest/settings.py` exists to prevent. It would also break
+`analysis.py`'s post-hoc TP grid search, which is only free because the walk
+carries no TP dependence at all. See `backtest/entry_ob.py`'s
+`TARGET_SEARCH_R`.
+
+**Mid-trade tracking is record-only for now (confirmed 2026-08-13).** The
+supporting-to-opposing flip is recomputed on every bar of an open trade and
+written to `data/target_log/`, but it changes nothing about entries, exits,
+or sizing. Acting on a decaying score (breakeven, partials, or cancelling)
+is a separate design, recorded in `roadmap/enhancements.md`.
+
+## The entry trigger (CONFIRMED and IMPLEMENTED 2026-08-13)
+
+Order blocks now DRIVE entries rather than merely scoring them. A trade
+candidate used to begin with an H1 fractal break, which fixed the direction
+before any zone was involved. It now begins with price taking a qualifying
+touch of a valid H1 order block, and the direction IS that zone's direction.
+Nothing is assumed about which way the market is going until it touches
+something.
+
+- The direction can legitimately disagree with the surrounding structure.
+  Price mitigating a bearish H1 internal OB is a sell setup even while the
+  H1 swing structure is bullish, and that is the point rather than an edge
+  case.
+- Consequently the three old mandatory gates (`h1_internal_structure`,
+  `h1_internal_zone`, `h1_fractal_structure`) are now SCORED FACTORS, not
+  rejections. As hard gates they would have rejected exactly the setups
+  described above.
+- **Which OB:** the most recently mitigated valid H1 OB, any tier. When two
+  zones are touched on the same candle the freshest wins, since the two can
+  imply opposite trades and an arbitrary tie-break would silently pick a
+  direction.
+- **Only qualifying touches trigger**, meaning progressively deeper ones,
+  the same test that advances the invalidation counter. A shallower re-tap
+  reaches nothing new.
+- **Killzone gate:** the touch must land inside a killzone or in the hour
+  immediately before one (06:00 to 10:00 and 11:00 to 15:00 London). Price
+  often taps the zone before the session and simply travels during it, so
+  requiring the touch itself to be in-session would miss the setup. A
+  pre-window touch defers its entry to the session's first candle.
+- **Entry** is the close of the mitigating candle, or of the deferred
+  killzone candle. A placeholder until the M15 entry models land.
+- **Stop** is 2 pips beyond the zone's FAR edge (below `bottom` for a demand
+  OB, above `top` for a supply OB), replacing the old opposite-fractal stop.
+  The zone is the thesis now, so the stop belongs to it.
+- Higher timeframes are NOT required to have been mitigated. Only H1 is
+  mandatory. A Daily or 4H gate with no valid zone is excluded from scoring
+  rather than answered "no".
+
+See `backtest/entry_ob.py` and `backtest/simulate.py`'s `find_signals`.
 
 ### Next Items
 
 Candle selection, zone shaping, same-anchor merging, `caused_displacement`,
-and `caused_imbalance` are all implemented as of 2026-08-05
-(`swing_structure/order_blocks.py`, `atr_period=14`, the project's existing
-default). What's left:
+and `caused_imbalance` were implemented 2026-08-05. The full invalidation
+lifecycle, the OB-mitigation trigger, both OB gates, and the supporting/
+opposing flip were implemented 2026-08-13. Note the module paths in the
+older sections above predate the `smc/` rename: order blocks now live in
+`smc/order_blocks/` and structure in `smc/market_structure/`.
 
-- Validate identified OBs against a real chart (TradingView/FX Replay)
-  before moving on to the Swept Liquidity sub-factors. Not yet done, the
-  demo script (`scripts/demo_order_blocks.py`) only smoke-tests that the
-  logic runs sanely on synthetic data.
-- Add `invalidated`/`invalidated_index`/`invalidated_date` alongside the
-  existing `mitigated` fields, covering rule 1 (full break-through) first,
-  rules 2/3 once their open TBDs (touch count N, large-OB threshold, 3a/3b
-  unification) are settled.
-- Decide whether the "large OB" criterion for invalidation rule 3 shares the
-  same 0.5x/1x ATR bands as zone shaping, or needs its own threshold.
-- Port to 4H/H1 (the wrappers already exist, `compute_h4_order_blocks`/
-  `compute_h1_order_blocks`, but only Daily has been run against real data
-  even in the synthetic smoke test).
+What's left:
+
+- Validate identified OBs against a real chart (TradingView/FX Replay).
+  Still not done. `scripts/demo_order_blocks.py` only smoke-tests that the
+  logic runs sanely.
+- Run the full walk-forward on the new trigger and compare against the
+  archived pre-change results. First single-year check on EUR_USD 2024 gives
+  144 candidates against roughly 76 under the old trigger.
+- **Lookback period** (below) is still unimplemented, so a never-touched OB
+  from years ago stays live forever and will surface in the target sweep.
+- `Old Points` and `Equals` swept-liquidity sub-factors still have no
+  detectors, and are omitted from scoring rather than answered "no".
+- Decide whether to bootstrap initial weights from `factors/*.csv` instead
+  of the current flat 1.0. Those numbers were tuned against different factor
+  definitions on the old trigger, so seeding them now would make year-one
+  results un-attributable. Worth an A/B once a clean baseline exists.

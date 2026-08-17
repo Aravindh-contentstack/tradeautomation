@@ -21,8 +21,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from swing_structure.daily_structure import compute_daily_structures  # noqa: E402
-from swing_structure.order_blocks import compute_daily_order_blocks  # noqa: E402
+from smc.market_structure.daily_structure import compute_daily_structures  # noqa: E402
+from smc.order_blocks.order_blocks import compute_daily_order_blocks  # noqa: E402
 
 from demo_daily_structure import build_synthetic_daily_data  # noqa: E402
 

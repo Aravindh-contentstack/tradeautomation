@@ -1,0 +1,19 @@
+{
+  "applied": {
+    "threshold": 70,
+    "tp_multiple": 4.0,
+    "max_sl_size_pips": 100.5
+  },
+  "recommended": {
+    "threshold": 60,
+    "tp_multiple": 4.0,
+    "max_sl_size_pips": 89.7,
+    "roi_r": 7.840058939280022,
+    "strike_rate": 0.46153846153846156,
+    "avg_r": 0.5226705959520015,
+    "breakeven_count": 2,
+    "trade_count": 15
+  },
+  "candidate_count": 53,
+  "taken_count": 13
+}

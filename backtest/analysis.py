@@ -35,14 +35,43 @@ above, out of 39). The `taken` flag is for reporting P&L, never for
 building the pool this function searches.
 """
 
-THRESHOLD_GRID = [40, 45, 50, 55, 60, 65, 66.67, 70, 75, 80]
 TP_MULTIPLE_GRID = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
 SL_SIZE_QUANTILES = [0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0]
+
+# Thresholds are derived from the year's own probability distribution,
+# the same way the max-SL grid is derived from observed stop sizes.
+#
+# The fixed 40-to-80 grid this replaces was calibrated against a scale
+# that no longer exists. Probability is now normalised over the factors
+# actually evaluated (backtest/factors.py), so a trade where only a
+# couple of gates had anything to say scores on a different effective
+# scale from one where all three timeframes spoke, and the observed range
+# runs well below 40 and can go negative. A fixed absolute grid on a
+# rescaled metric is not a conservative choice, it is a silent
+# mis-search: every grid point can land above the whole population, and
+# the search then reports "no combination cleared the minimum trade
+# count" rather than an honest recommendation.
+THRESHOLD_QUANTILES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 # Raised from 5. Not a performance fix (measured -0.0179 to -0.0171
 # R/trade), but it stops the search fitting a whole year's settings to 5
 # trades, which is exactly what it did for GBP_USD 2024 and XAU_USD 2024.
 MIN_TRADES_FOR_CONSIDERATION = 8
+
+
+def _threshold_grid(candidates):
+    """Probability thresholds drawn from the candidates' own quantiles.
+
+    Deduplicated and rounded, so a year whose probabilities cluster
+    tightly produces a short grid rather than ten near-identical cut
+    points that all admit the same pool.
+    """
+    values = sorted(c["probability"] for c in candidates)
+    n = len(values)
+    if n == 0:
+        return []
+    thresholds = {round(values[min(int(q * (n - 1)), n - 1)], 2) for q in THRESHOLD_QUANTILES}
+    return sorted(thresholds)
 
 
 def _max_sl_size_pips_grid(candidates, pip_size):
@@ -124,11 +153,12 @@ def recommend_global_settings(candidates, pip_size):
         return None
 
     best = None
+    threshold_grid = _threshold_grid(candidates)
     for max_sl_size_pips in _max_sl_size_pips_grid(candidates, pip_size):
         max_sl_size_price = max_sl_size_pips * pip_size
         pool_by_sl = [c for c in candidates if c["sl_size"] <= max_sl_size_price]
 
-        for threshold in THRESHOLD_GRID:
+        for threshold in threshold_grid:
             pool_by_threshold = [
                 c for c in pool_by_sl if c["probability"] >= threshold
             ]

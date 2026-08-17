@@ -1,10 +1,12 @@
 """Signal detection and per-trade outcome simulation.
 
-Entry trigger: a genuine H1 fractal break (h1_fractal_high_event ==
-"break of swing high" for a candidate buy, h1_fractal_low_event ==
-"break of swing low" for a candidate sell), which fires on every real
-break, unlike h1_fractal_structure_event (only fires on a direction
-flip, see backtest/pipeline.py's plan notes).
+Entry trigger: price taking a qualifying (progressively deeper) touch of
+a valid H1 order block, inside a killzone or the hour before one. The
+trade's direction is the touched zone's own direction, so nothing is
+assumed about which way the market is going until it touches something.
+See backtest/entry_ob.py for the mechanics, and the module docstring
+there for what this replaced (an H1 fractal break, which fixed the
+direction before any zone was involved).
 
 The walk carries NO take-profit
 -------------------------------
@@ -14,9 +16,10 @@ applied afterwards, by apply_tp.
 
 That split is not a stylistic choice. Every management rule the user
 actually trades -- the stop, the 19:00 breakeven trigger, the 19:00 loss
-cut, the Friday deadline -- is a function of price and the clock ALONE.
-None of them consults the TP. So a single TP-free walk traces the unique
-path that every TP variant shares, and
+cut, the Friday deadline, the mid-trade probability recheck that can also
+move the stop to breakeven -- is a function of price, the clock, and the
+OB universe ALONE. None of them consults the TP. So a single TP-free walk
+traces the unique path that every TP variant shares, and
 
     realised_r = tp_multiple  if max_r_reached >= tp_multiple
                  else terminal_r
@@ -47,7 +50,20 @@ Do not introduce any TP dependence into the walk.
 import numpy as np
 import pandas as pd
 
-from backtest.factors import evaluate_factors, compute_probability
+from backtest.context import bar_timestamp
+from backtest.entry_ob import (
+    TARGET_SEARCH_R,
+    build_setup,
+    iter_mitigation_candidates,
+    resolve_entry_bar,
+)
+from backtest.factors import (
+    ALL_FACTORS,
+    compute_probability,
+    evaluate_always_factors,
+    evaluate_mitigation_ob_factors,
+    evaluate_ob_target_factors,
+)
 from backtest.killzone import (
     friday_cutoff_for,
     london_cutoff_for,
@@ -73,12 +89,11 @@ FIXED_TP_MULTIPLE = 2.5
 MAX_R_CEILING = 10.0
 
 
-def find_signals(ctx, weights):
-    """Returns a list of signal dicts: every H1 fractal break that passes
-    all 3 mandatory H1 gates (h1_internal_structure, h1_internal_zone,
-    h1_fractal_structure) and the killzone gate, using the CURRENT
-    weights table. No probability threshold and no max-SL filter is
-    applied here: those are decided later, by the prior year's settings
+def find_signals(ctx, weights, pip_size):
+    """Returns a list of signal dicts: every qualifying touch of a valid
+    H1 order block that also passes the killzone gate, scored with the
+    CURRENT weights table. No probability threshold and no max-SL filter
+    is applied here: those are decided later, by the prior year's settings
     (backtest/settings.py).
 
     That separation is load-bearing, not incidental. If this function
@@ -89,70 +104,82 @@ def find_signals(ctx, weights):
     starved. Every candidate is returned; `taken` records whether the
     settings admitted it.
 
-    None of the 3 mandatory gates are scored probability factors (see
-    backtest/factors.py): they're pure entry criteria, checked directly
-    off the row rather than through evaluate_factors.
+    The trade's DIRECTION is the mitigated zone's direction, decided by
+    what price touched rather than assumed beforehand. The three H1 gates
+    that used to reject candidates outright (internal structure, internal
+    zone, fractal structure) are scored factors now, because the mitigated
+    zone can legitimately disagree with them.
 
-    Takes a MarketContext (backtest/context.py). A bare DataFrame is also
-    accepted, so callers that have no context yet still work.
+    pip_size places the stop SL_BUFFER_PIPS beyond the zone's far edge
+    rather than exactly on it.
+
+    Requires a MarketContext carrying OB state (backtest/context.py). A
+    context without it yields nothing, which is what a caller that never
+    built the universe should get.
     """
-    df = getattr(ctx, "df", ctx)
-
-    is_high_break = df["h1_fractal_high_event"] == "break of swing high"
-    is_low_break = df["h1_fractal_low_event"] == "break of swing low"
-    candidates = df[is_high_break | is_low_break]
+    if getattr(ctx, "obs", None) is None:
+        return []
 
     signals = []
-    for idx, row in candidates.iterrows():
-        if row["h1_fractal_high_event"] == "break of swing high":
-            direction = "bullish"
-            sl = row["h1_fractal_swing_low"]
-        else:
-            direction = "bearish"
-            sl = row["h1_fractal_swing_high"]
-
-        # Mandatory gate 1: h1 internal structure alignment.
-        if row["h1_internal_structure"] != direction:
+    for k, ob_row, touch_no in iter_mitigation_candidates(ctx):
+        entry_index = resolve_entry_bar(ctx, k)
+        if entry_index is None:
             continue
 
-        entry_price = row["close"]
-        if pd.isna(sl) or pd.isna(entry_price):
-            continue
-        r_distance = abs(entry_price - sl)
-        if r_distance <= 0:
+        setup = build_setup(ctx, ob_row, entry_index, pip_size)
+        if setup is None:
             continue
 
-        session = session_for(row["date"])
+        entry_time = bar_timestamp(ctx, entry_index)
+        session = session_for(entry_time)
         if session is None:
             continue
 
-        # Mandatory gate 2: h1_internal_zone (the OTE factor) must align
-        # (premium for a short, discount for a long).
-        h1_internal_zone_aligned = (
-            row["h1_internal_zone"] == "premium"
-            if direction == "bearish"
-            else row["h1_internal_zone"] == "discount"
+        direction = setup["direction"]
+        row = ctx.df.iloc[entry_index]
+        mitigation_factor_results = evaluate_mitigation_ob_factors(
+            ctx.obs, entry_index, direction, ob_row
         )
-        if not h1_internal_zone_aligned:
-            continue
-
-        # Mandatory gate 3: h1 fractal structure alignment.
-        if row["h1_fractal_structure"] != direction:
-            continue
-
-        factor_results = evaluate_factors(row, direction)
+        factor_results = dict(evaluate_always_factors(row, direction))
+        factor_results.update(mitigation_factor_results)
+        factor_results.update(
+            evaluate_ob_target_factors(
+                ctx.obs,
+                entry_index,
+                direction,
+                TARGET_SEARCH_R * setup["r_distance"],
+                float(ctx.high[entry_index]),
+                float(ctx.low[entry_index]),
+            )
+        )
         probability = compute_probability(factor_results, weights)
 
         signals.append({
-            "idx": idx,
+            # The ENTRY bar, not the mitigation bar: simulate_trade walks
+            # from idx + 1, so a deferred entry that reported its trigger
+            # bar here would re-walk the deferral gap as if it were part
+            # of the trade.
+            "idx": entry_index,
             "direction": direction,
-            "entry_time": row["date"],
-            "entry_price": entry_price,
-            "sl": sl,
-            "r_distance": r_distance,
+            "entry_time": entry_time,
+            "entry_price": setup["entry_price"],
+            "sl": setup["sl"],
+            "r_distance": setup["r_distance"],
             "session": session,
             "probability": probability,
             "factor_results": factor_results,
+            "ob_row": ob_row,
+            "ob_touch_no": touch_no,
+            "ob_top": float(ctx.obs.series["H1"].top[ob_row]),
+            "ob_bottom": float(ctx.obs.series["H1"].bottom[ob_row]),
+            "mitigation_idx": k,
+            "mitigation_time": bar_timestamp(ctx, k),
+            "entry_deferred": entry_index != k,
+            "excluded_gates": sorted(set(ALL_FACTORS) - set(factor_results)),
+            # Frozen for the life of the trade, handed unchanged to
+            # simulate_trade so the mid-trade probability recheck can rebuild
+            # a live score without re-deriving the entry's own Mitigation OB.
+            "mitigation_factor_results": mitigation_factor_results,
         })
 
     return signals
@@ -209,7 +236,10 @@ def _intrabar_favourable_credit(ctx, k, sign, entry_price, stop, r_distance):
     return credit, True
 
 
-def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=None):
+def simulate_trade(
+    ctx, idx, direction, entry_price, sl, r_distance, tp_levels=None,
+    weights=None, threshold=None, mitigation_factor_results=None,
+):
     """Walks forward from the bar AFTER idx under the user's real trade
     management, with no take-profit (see the module docstring).
 
@@ -223,11 +253,22 @@ def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=N
       2. DAILY CHECKPOINT. At 19:00 London, read the unrealised R at this
          bar's OPEN. In profit -> move the stop to entry (once). Not in
          profit -> cut, EXIT_CUT_19H, at that fractional R.
-      3. FAVOURABLE. Update the running max R and any TP touches,
+      3. LIVE PROBABILITY CHECK. Rebuilds the trade's probability every
+         bar: the Mitigation OB answers stay exactly as frozen at entry,
+         but the Always (structure/zone) and Target OB answers are
+         re-evaluated live off this bar, using the same frozen weights
+         and the same threshold that admitted the trade in the first
+         place. The first bar this drops below threshold -> move the
+         stop to entry (once). Skipped entirely once already at
+         breakeven, and skipped whenever `weights`, `threshold`,
+         `mitigation_factor_results`, or `ctx.obs` is None, which keeps
+         every caller that omits them (including every existing test)
+         running exactly as before.
+      4. FAVOURABLE. Update the running max R and any TP touches,
          provisionally.
-      4. STOP. Active stop touched -> EXIT_SL (-1.0R) before breakeven,
+      5. STOP. Active stop touched -> EXIT_SL (-1.0R) before breakeven,
          EXIT_BE_STOP (0.0R) after.
-      5. ATTRIBUTION. If step 4 fired, DISCARD step 3's credit for this
+      6. ATTRIBUTION. If step 5 fired, DISCARD step 4's credit for this
          bar and re-derive it from M15 sub-bars.
 
     Steps 1 and 2 fire at the bar OPEN, so they strictly precede any
@@ -282,9 +323,19 @@ def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=N
     stop = sl
     be_moved = False
     be_idx = None
+    be_trigger = None
+    be_probability = None
     max_r = 0.0
     checkpoints = 0
     tp_touches = {}
+
+    live_recheck_enabled = (
+        weights is not None
+        and threshold is not None
+        and mitigation_factor_results is not None
+        and getattr(ctx, "obs", None) is not None
+    )
+    target_max_distance = TARGET_SEARCH_R * r_distance
 
     closed = False
     terminal_r = 0.0
@@ -319,6 +370,7 @@ def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=N
                     stop = entry_price
                     be_moved = True
                     be_idx = k
+                    be_trigger = "19h_checkpoint"
             else:
                 terminal_r = r_at_open
                 terminal_reason = EXIT_CUT_19H
@@ -336,7 +388,25 @@ def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=N
                 checkpoint = next_london_cutoff(checkpoint)
                 next_checkpoint = _naive_utc(checkpoint)
 
-        # --- 3. FAVOURABLE (provisional) --------------------------------
+        # --- 3. LIVE PROBABILITY CHECK -----------------------------------
+        if live_recheck_enabled and not be_moved:
+            live_factors = dict(mitigation_factor_results)
+            live_factors.update(evaluate_always_factors(ctx.df.iloc[k], direction))
+            live_factors.update(
+                evaluate_ob_target_factors(
+                    ctx.obs, k, direction, target_max_distance,
+                    float(ctx.high[k]), float(ctx.low[k]),
+                )
+            )
+            live_probability = compute_probability(live_factors, weights)
+            if live_probability < threshold:
+                stop = entry_price
+                be_moved = True
+                be_idx = k
+                be_trigger = "target_ob_probability"
+                be_probability = live_probability
+
+        # --- 4. FAVOURABLE (provisional) --------------------------------
         max_r_before_bar = max_r
         touched_this_bar = []
 
@@ -349,11 +419,11 @@ def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=N
                 tp_touches[level] = (k, pd.Timestamp(t, tz="UTC"))
                 touched_this_bar.append(level)
 
-        # --- 4. STOP ----------------------------------------------------
+        # --- 5. STOP ----------------------------------------------------
         adverse_extreme = ctx.low[k] if sign > 0 else ctx.high[k]
         if sign * (adverse_extreme - stop) <= 0.0:
-            # --- 5. ATTRIBUTION -----------------------------------------
-            # Step 3's credit for THIS bar is discarded outright and
+            # --- 6. ATTRIBUTION -----------------------------------------
+            # Step 4's credit for THIS bar is discarded outright and
             # re-derived from inside the bar.
             credit, intrabar_resolved = _intrabar_favourable_credit(
                 ctx, k, sign, entry_price, stop, r_distance
@@ -407,6 +477,8 @@ def simulate_trade(ctx, idx, direction, entry_price, sl, r_distance, tp_levels=N
         "tp_touches": tp_touches,
         "be_moved": be_moved,
         "be_idx": be_idx,
+        "be_trigger": be_trigger,
+        "be_probability": be_probability,
         "checkpoints": checkpoints,
         "sl_excursion_pips": float(sl_excursion_pips),
         "intrabar_resolved": bool(intrabar_resolved),

@@ -1,8 +1,10 @@
 """Adaptive per-factor weight table.
 
-Starts all 15 factors at weight 1.0. After each trade, a factor's weight
+Starts every factor at weight 1.0. After each trade, a factor's weight
 moves +/-2% depending on whether it said yes/no and whether the trade
-won or lost, per the user's exact 4-branch rule.
+won or lost, per the user's exact 4-branch rule. Factors that were
+excluded from a trade's scoring (see backtest/factors.py) are simply
+absent from factor_results and so learn nothing from it.
 
 Learning runs over ALL candidates, including the ones the prior year's
 probability threshold rejected: the factors were evaluated on those bars
@@ -44,11 +46,26 @@ def update_weights(weights, factor_results, realised_r):
 
     won = realised_r > 0
     for factor, is_yes in factor_results.items():
-        if is_yes == won:
-            weights[factor] *= 1.02
-        else:
-            weights[factor] *= 0.98
+        # A factor omitted from factor_results is untouched by
+        # construction, which is what dynamic exclusion needs: a gate that
+        # had nothing to say about this trade learns nothing from its
+        # outcome. The .get default covers a stored table written before
+        # the factor existed.
+        base = weights.get(factor, 1.0)
+        weights[factor] = base * (1.02 if is_yes == won else 0.98)
     return weights
+
+
+def ensure_factors(weights):
+    """Reconciles a stored weight table against the current factor list.
+
+    Weight CSVs are written once a year and read back the next, so a
+    schema change leaves last year's file short of columns. Missing
+    factors start at 1.0 (the same place every factor starts) and retired
+    ones are dropped, so an older file degrades gracefully instead of
+    raising a KeyError partway through a year's trades.
+    """
+    return {factor: float(weights.get(factor, 1.0)) for factor in ALL_FACTORS}
 
 
 def save_weights(weights, path):
@@ -57,4 +74,4 @@ def save_weights(weights, path):
 
 def load_weights(path):
     df = pd.read_csv(path)
-    return df.iloc[0].to_dict()
+    return ensure_factors(df.iloc[0].to_dict())

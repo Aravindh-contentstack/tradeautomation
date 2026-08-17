@@ -1,0 +1,8 @@
+{
+  "threshold": 80,
+  "tp_multiple": 2.5,
+  "max_sl_size_pips": 63.1,
+  "roi_r": 13.5,
+  "strike_rate": 0.5,
+  "trade_count": 18
+}
