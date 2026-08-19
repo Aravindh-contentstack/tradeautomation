@@ -22,6 +22,8 @@ own stated server timezone before running live - not every broker
 uses EET.
 """
 
+from datetime import datetime, timezone
+
 import MetaTrader5 as mt5
 import pandas as pd
 from zoneinfo import ZoneInfo
@@ -234,6 +236,30 @@ def close_position_at_market(ticket, symbol, direction, volume, deviation=20, ma
     if result is None:
         return {"success": False, "retcode": None, "comment": str(mt5.last_error())}
     return {"success": result.retcode == mt5.TRADE_RETCODE_DONE, "retcode": result.retcode, "comment": result.comment}
+
+
+def floating_profit(magic):
+    """Sum of unrealized profit across this magic number's currently open
+    positions - used to fold a pair's own open exposure into its
+    independent daily-loss check, since two positions with the same
+    magic don't have separate 'accounts' to read a balance from.
+    """
+    positions = mt5.positions_get()
+    if not positions:
+        return 0.0
+    return sum(p.profit for p in positions if p.magic == magic)
+
+
+def today_realized_profit(magic, since_utc):
+    """Sum of profit from this magic number's deals that closed a
+    position (DEAL_ENTRY_OUT) since `since_utc` - the realized half of a
+    pair's own today P&L, independent of what any other magic number on
+    the same account did today.
+    """
+    deals = mt5.history_deals_get(since_utc, datetime.now(timezone.utc))
+    if not deals:
+        return 0.0
+    return sum(d.profit for d in deals if d.magic == magic and d.entry == mt5.DEAL_ENTRY_OUT)
 
 
 def get_closed_deal(ticket):

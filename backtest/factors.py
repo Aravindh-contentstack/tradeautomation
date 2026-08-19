@@ -1,6 +1,6 @@
 """The yes/no factor evaluation and the weighted probability formula.
 
-Three families, all scored the same way once answered:
+Five families, all scored the same way once answered:
 
 - **Always** (`ALWAYS_FACTORS`): the structure and zone columns, read
   straight off the merged frame's row. Yes when the tier's bullish/bearish
@@ -11,6 +11,12 @@ Three families, all scored the same way once answered:
   the trade.
 - **OB Target** (`OB_TARGET_FACTORS`): the qualities of the nearest
   opposite-direction zone price is being drawn TOWARD.
+- **Swept Liquidity** (`SWEPT_LIQUIDITY_GATE_FACTORS`): what the most
+  recently closed Daily or 4H candle took out. Not anchored to any zone,
+  and frozen at entry like the Mitigation OB gate.
+- **Liquidity Target** (`LIQUIDITY_TARGET_FACTORS`): what untaken
+  liquidity is still sitting within reach in the direction of travel.
+  Dynamic, and the one gate that never answers no (see below).
 
 Dynamic exclusion
 -----------------
@@ -35,10 +41,22 @@ what stops it going further, which hurts. So every answer is negated once
 the target is reached: strong-and-unreached is a yes, strong-and-reached
 is a no, and a weak zone reads the other way round on both counts.
 
-Old Points and Equals liquidity appear in factors/*.csv but have no
-detectors yet, so they are absent here rather than permanently "no". A
-constant "no" would drag every probability down by a fixed amount and
-feed pure noise into the weight learning.
+Liquidity Target never answers no
+--------------------------------
+Worth stating plainly, because it makes that one gate different from every
+other. Its factors are emitted as yes when a level is in range and omitted
+otherwise, with no parent roll-up, so the gate can only ever RAISE a
+setup's score. That follows directly from the user's rule that a target
+price has covered becomes NA rather than turning against the trade: if
+"covered" is silence, then "never there" has to be silence too, or the two
+would be scored differently for no reason a trader would recognise.
+
+The discrimination therefore comes from HOW MANY kinds of liquidity are in
+range, not from any of them saying no. Measured on EUR_USD 2025, both gates
+together add a mean of 7.7 factors per candidate against a base of about 27,
+ranging from 2 to 16. If that proves too blunt, the fix is a parent that
+answers no when nothing at all is in range, exactly mirroring the swept
+side, and roadmap/liquidity.md records it as the open option.
 """
 
 STRUCTURE_FACTORS = [
@@ -82,15 +100,51 @@ OB_QUALITY_FACTORS = [
     ("flip_zone", "is_flip_zone"),
 ]
 
-# The swept-liquidity children that have detectors. Old Points and Equals
-# are deliberately missing (see the module docstring).
-SWEPT_LIQUIDITY_FACTORS = [
+# The swept-liquidity children an order block can carry, as
+# (factor suffix, the column ob_state carries it in).
+#
+# Every timeframe gets the structural kinds plus the pivot-derived ones. H1
+# additionally gets the time-based kinds, which is the user's confirmed rule
+# that an H1 sweep only counts when it is attached to an order block: a sweep
+# that does not break structure leaves nothing to trade from, so there is no
+# standalone H1 Swept Liquidity gate for them to live in.
+#
+# Kept per timeframe rather than as one shared list so the factor namespace
+# does not fill up with names that can never be emitted, such as
+# daily_mitigation_ob_swept_liquidity_asian.
+# APPEND ONLY. backtest/target_log.py derives its bitmask positions from
+# this order, and reordering silently reinterprets every stored row. The
+# first five are the ones that existed before the liquidity work and keep
+# their original positions for that reason, even though grouping the
+# structural three with old points and equals would read better.
+_SHARED_SWEPT_FACTORS = [
     ("swept_liquidity_swing", "swept_liquidity_swing"),
     ("swept_liquidity_internal", "swept_liquidity_internal"),
     ("swept_liquidity_fractal", "swept_liquidity_fractal"),
     ("swept_liquidity_fvg", "swept_liquidity_fvg"),
     ("swept_liquidity_previous_candle", "swept_liquidity_previous_candle"),
+    ("swept_liquidity_old_points", "swept_liquidity_old_point"),
+    ("swept_liquidity_equals", "swept_liquidity_equals"),
+    ("swept_liquidity_lrlq", "swept_liquidity_lrlq"),
 ]
+
+_H1_TIME_SWEPT_FACTORS = [
+    ("swept_liquidity_asian", "swept_liquidity_asian"),
+    ("swept_liquidity_london", "swept_liquidity_london"),
+    ("swept_liquidity_ny", "swept_liquidity_ny"),
+    ("swept_liquidity_previous_day", "swept_liquidity_previous_day"),
+    ("swept_liquidity_previous_week", "swept_liquidity_previous_week"),
+]
+
+SWEPT_LIQUIDITY_FACTORS_BY_TF = {
+    "Daily": _SHARED_SWEPT_FACTORS,
+    "4H": _SHARED_SWEPT_FACTORS,
+    "H1": _SHARED_SWEPT_FACTORS + _H1_TIME_SWEPT_FACTORS,
+}
+
+# Kept for callers that want the union without caring which timeframe can
+# emit what. backtest/target_log.py's bit table is one.
+SWEPT_LIQUIDITY_FACTORS = _SHARED_SWEPT_FACTORS + _H1_TIME_SWEPT_FACTORS
 
 CONTAINMENT_FACTOR = {"4H": "within_daily_ob", "H1": "within_h4_ob"}
 
@@ -99,7 +153,8 @@ def _gate_factor_names(gate):
     """Every key one gate contributes, across all three timeframes."""
     names = []
     for timeframe, prefix in TIMEFRAME_KEYS.items():
-        for suffix, _ in OB_QUALITY_FACTORS + SWEPT_LIQUIDITY_FACTORS:
+        children = OB_QUALITY_FACTORS + SWEPT_LIQUIDITY_FACTORS_BY_TF[timeframe]
+        for suffix, _ in children:
             names.append("%s_%s_%s" % (prefix, gate, suffix))
         # The parent roll-up, scored only when nothing at all was swept.
         names.append("%s_%s_swept_liquidity" % (prefix, gate))
@@ -111,7 +166,85 @@ def _gate_factor_names(gate):
 MITIGATION_OB_FACTORS = _gate_factor_names("mitigation_ob")
 OB_TARGET_FACTORS = _gate_factor_names("ob_target")
 
-ALL_FACTORS = ALWAYS_FACTORS + MITIGATION_OB_FACTORS + OB_TARGET_FACTORS
+# --- The two standalone liquidity gates ---------------------------------
+#
+# Neither is anchored to an order block. Swept Liquidity asks what the last
+# closed candle took; Liquidity Target asks what is still sitting there to
+# be taken.
+
+# Swept Liquidity is Daily and 4H only. H1's sweeps live on the OB gates
+# above, per the user's confirmed rule.
+SWEPT_GATE_TIMEFRAMES = ["Daily", "4H"]
+
+# One time-based child each, matching which timeframe owns that level. The
+# previous week is a Daily-candle question, the previous day a 4H one.
+SWEPT_GATE_TIME_CHILD = {"Daily": "previous_week", "4H": "previous_day"}
+
+SWEPT_GATE_CHILDREN = ["swing", "internal", "fractal", "old_points", "equals",
+                       "fvg", "lrlq"]
+
+# Liquidity Target runs on all three timeframes. Structural strong points
+# are deliberately absent: the user confirmed only Old Points can be a
+# target, since a swing/internal/fractal point is expected to HOLD rather
+# than to be run.
+TARGET_GATE_CHILDREN = ["old_points", "equals", "fvg", "lrlq"]
+
+# Session and daily/weekly levels are targets on H1 only. Unlike the sweep
+# side, where each timeframe owns its own clock level, every time-based
+# target is hunted inside an H1 trade.
+TARGET_GATE_H1_CHILDREN = ["asian", "london", "ny", "previous_day", "previous_week"]
+
+
+def _swept_gate_names():
+    names = []
+    for timeframe in SWEPT_GATE_TIMEFRAMES:
+        prefix = TIMEFRAME_KEYS[timeframe]
+        for child in SWEPT_GATE_CHILDREN + [SWEPT_GATE_TIME_CHILD[timeframe]]:
+            names.append("%s_swept_liquidity_%s" % (prefix, child))
+        names.append("%s_swept_liquidity" % prefix)
+    return names
+
+
+def _target_gate_names():
+    names = []
+    for timeframe, prefix in TIMEFRAME_KEYS.items():
+        children = list(TARGET_GATE_CHILDREN)
+        if timeframe == "H1":
+            children += TARGET_GATE_H1_CHILDREN
+        for child in children:
+            names.append("%s_liquidity_target_%s" % (prefix, child))
+    return names
+
+
+SWEPT_LIQUIDITY_GATE_FACTORS = _swept_gate_names()
+LIQUIDITY_TARGET_FACTORS = _target_gate_names()
+
+# Factor-name child to the `kind` string the detectors and liq_state use.
+# They differ in exactly one place, "old_points" against "old_point", which
+# is not worth renaming either side over: the factor sheet says Old Points
+# and the detector emits one row per level.
+KIND_FOR = {
+    "swing": "swing",
+    "internal": "internal",
+    "fractal": "fractal",
+    "old_points": "old_point",
+    "equals": "equals",
+    "lrlq": "lrlq",
+    "fvg": "fvg",
+    "asian": "asian",
+    "london": "london",
+    "ny": "ny",
+    "previous_day": "previous_day",
+    "previous_week": "previous_week",
+}
+
+ALL_FACTORS = (
+    ALWAYS_FACTORS
+    + MITIGATION_OB_FACTORS
+    + OB_TARGET_FACTORS
+    + SWEPT_LIQUIDITY_GATE_FACTORS
+    + LIQUIDITY_TARGET_FACTORS
+)
 
 
 def evaluate_always_factors(row, trade_direction):
@@ -164,7 +297,7 @@ def _ob_factor_answers(series, ob_row, bar_index, prefix, gate, negate):
         emit(containment, bool(quality[containment][ob_row]))
 
     swept_any = False
-    for suffix, column in SWEPT_LIQUIDITY_FACTORS:
+    for suffix, column in SWEPT_LIQUIDITY_FACTORS_BY_TF[series.timeframe]:
         if column in quality and bool(quality[column][ob_row]):
             emit(suffix, True)
             swept_any = True
@@ -251,6 +384,113 @@ def evaluate_ob_target_factors(obs, bar_index, direction, max_distance, high, lo
         results.update(
             _ob_factor_answers(series, ob_row, bar_index, prefix, "ob_target", reached)
         )
+
+    return results
+
+
+def _wanted_side(direction):
+    """Which side of the book a sweep has to have taken to help this trade.
+
+    A long wants the SELL stops under the market run: the lows have been
+    taken, the sellers who were going to sell have sold, and what is left
+    above is buyers. Sweeping the highs before a long is the opposite
+    story, so it is omitted rather than scored.
+    """
+    return "low" if direction == "bullish" else "high"
+
+
+def evaluate_swept_liquidity_factors(liq, bar_index, direction):
+    """The standalone Swept Liquidity gate, Daily and 4H only.
+
+    What the most recently CLOSED candle of that timeframe took, which is
+    the user's confirmed recency rule: a sweep two candles back scores
+    nothing. liq_state precomputed that carry, so this is array reads.
+
+    Roll-up follows the OB gates exactly: only the kinds actually swept are
+    emitted, as yes, and the parent is dropped, so taking two kinds of
+    liquidity scores higher than taking one. When nothing was swept the
+    parent alone is emitted, as a no.
+
+    Frozen at entry by the caller, same as the Mitigation OB gate. What
+    price took on its way into the zone does not change afterwards.
+
+    The "external to the swing range" condition on old points is NOT
+    applied here. It needs the level's own price, which this gate never
+    sees, and it is a point-in-time question best answered on the candle
+    that did the sweeping. smc/liquidity/sweeps.pooled_level_sweeps applies
+    it there instead.
+    """
+    if liq is None:
+        return {}
+
+    side = _wanted_side(direction)
+    results = {}
+
+    for timeframe in SWEPT_GATE_TIMEFRAMES:
+        prefix = TIMEFRAME_KEYS[timeframe]
+        children = SWEPT_GATE_CHILDREN + [SWEPT_GATE_TIME_CHILD[timeframe]]
+
+        swept_any = False
+        for child in children:
+            swept = liq.swept_last_candle.get((timeframe, KIND_FOR[child], side))
+            if swept is None or not bool(swept[bar_index]):
+                continue
+            results["%s_swept_liquidity_%s" % (prefix, child)] = True
+            swept_any = True
+
+        if not swept_any:
+            results["%s_swept_liquidity" % prefix] = False
+
+    return results
+
+
+def evaluate_liquidity_target_factors(liq, bar_index, direction, high, low,
+                                      max_distance, week_max_distance):
+    """The standalone Liquidity Target gate, all three timeframes.
+
+    Emits YES for every kind that still has an untaken level sitting within
+    reach in the direction of travel, and omits the rest. There is no NO
+    case and no parent roll-up: the user's rule is that a target which
+    price has covered becomes NA rather than turning against the trade, and
+    a kind that never had a level in range never had anything to say
+    either.
+
+    That makes this gate monotonically helpful, unlike OB Target which
+    negates once price arrives. It is the deliberate consequence of "these
+    factors become NA as and when the price covers these liquidities".
+
+    Re-evaluated on every bar of an open trade, which is what lets targets
+    fall away one at a time as price eats through them.
+
+    week_max_distance is separate because previous-week levels are allowed
+    out to 7.5R where everything else is capped at 5R: a weekly level is a
+    bigger draw and worth reaching further for.
+    """
+    if liq is None:
+        return {}
+
+    bullish = direction == "bullish"
+    lookup = liq.target_above if bullish else liq.target_below
+    edge = high if bullish else low
+
+    results = {}
+    for timeframe, prefix in TIMEFRAME_KEYS.items():
+        children = list(TARGET_GATE_CHILDREN)
+        if timeframe == "H1":
+            children += TARGET_GATE_H1_CHILDREN
+
+        for child in children:
+            price = lookup.get((timeframe, KIND_FOR[child]))
+            if price is None:
+                continue
+            target = price[bar_index]
+            if target != target:
+                continue
+
+            limit = week_max_distance if child == "previous_week" else max_distance
+            if limit is not None and abs(target - edge) > limit:
+                continue
+            results["%s_liquidity_target_%s" % (prefix, child)] = True
 
     return results
 

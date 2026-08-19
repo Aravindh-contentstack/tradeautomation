@@ -1,0 +1,1 @@
+- How equal highs re being being detected. 

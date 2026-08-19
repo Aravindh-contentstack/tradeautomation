@@ -53,6 +53,7 @@ import pandas as pd
 from backtest.context import bar_timestamp
 from backtest.entry_ob import (
     TARGET_SEARCH_R,
+    WEEKLY_TARGET_SEARCH_R,
     build_setup,
     iter_mitigation_candidates,
     resolve_entry_bar,
@@ -61,8 +62,10 @@ from backtest.factors import (
     ALL_FACTORS,
     compute_probability,
     evaluate_always_factors,
+    evaluate_liquidity_target_factors,
     evaluate_mitigation_ob_factors,
     evaluate_ob_target_factors,
+    evaluate_swept_liquidity_factors,
 )
 from backtest.killzone import (
     friday_cutoff_for,
@@ -137,9 +140,19 @@ def find_signals(ctx, weights, pip_size):
 
         direction = setup["direction"]
         row = ctx.df.iloc[entry_index]
+        # Both frozen gates in one dict: what the zone was, and what price
+        # had already taken on its way in. Neither changes once the trade is
+        # open, so simulate_trade rebuilds its live score on top of this
+        # rather than re-deriving it every bar.
         mitigation_factor_results = evaluate_mitigation_ob_factors(
             ctx.obs, entry_index, direction, ob_row
         )
+        mitigation_factor_results.update(
+            evaluate_swept_liquidity_factors(
+                getattr(ctx, "liq", None), entry_index, direction
+            )
+        )
+
         factor_results = dict(evaluate_always_factors(row, direction))
         factor_results.update(mitigation_factor_results)
         factor_results.update(
@@ -150,6 +163,17 @@ def find_signals(ctx, weights, pip_size):
                 TARGET_SEARCH_R * setup["r_distance"],
                 float(ctx.high[entry_index]),
                 float(ctx.low[entry_index]),
+            )
+        )
+        factor_results.update(
+            evaluate_liquidity_target_factors(
+                getattr(ctx, "liq", None),
+                entry_index,
+                direction,
+                float(ctx.high[entry_index]),
+                float(ctx.low[entry_index]),
+                TARGET_SEARCH_R * setup["r_distance"],
+                WEEKLY_TARGET_SEARCH_R * setup["r_distance"],
             )
         )
         probability = compute_probability(factor_results, weights)
@@ -336,6 +360,7 @@ def simulate_trade(
         and getattr(ctx, "obs", None) is not None
     )
     target_max_distance = TARGET_SEARCH_R * r_distance
+    weekly_target_max_distance = WEEKLY_TARGET_SEARCH_R * r_distance
 
     closed = False
     terminal_r = 0.0
@@ -396,6 +421,17 @@ def simulate_trade(
                 evaluate_ob_target_factors(
                     ctx.obs, k, direction, target_max_distance,
                     float(ctx.high[k]), float(ctx.low[k]),
+                )
+            )
+            # Re-asked every bar for the same reason as the OB target, and
+            # with the opposite consequence: a liquidity target price has
+            # covered simply drops out, so the score falls back toward what
+            # the remaining, still-untaken liquidity supports.
+            live_factors.update(
+                evaluate_liquidity_target_factors(
+                    getattr(ctx, "liq", None), k, direction,
+                    float(ctx.high[k]), float(ctx.low[k]),
+                    target_max_distance, weekly_target_max_distance,
                 )
             )
             live_probability = compute_probability(live_factors, weights)

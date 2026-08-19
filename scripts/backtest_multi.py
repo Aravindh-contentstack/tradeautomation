@@ -136,6 +136,7 @@ def run_instrument(instrument, years=YEARS):
             settings=applied,
             m15_df=m15_df,
             obs=bundle.obs,
+            liq=bundle.liq,
         )
 
         save_weights(learned_weights, weights_path(instrument, year))

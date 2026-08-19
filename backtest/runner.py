@@ -52,6 +52,7 @@ an open-ended extension.
 
 import pandas as pd
 
+from smc.liquidity.liq_state import slice_universe as slice_liquidity
 from smc.order_blocks.ob_state import slice_universe
 
 from backtest.context import build_market_context
@@ -97,7 +98,7 @@ def _window(frame, start, end):
 
 def run_year(df, year, *, pip_size, frozen_weights, settings,
              m15_df=None, tp_levels=None, walk_tail=DEFAULT_WALK_TAIL,
-             obs=None, log_targets=False, instrument=None):
+             obs=None, liq=None, log_targets=False, instrument=None):
     """Simulates and journals EVERY gate-passing candidate of `year`.
 
     df is the full instrument pipeline frame (backtest/pipeline.py). settings
@@ -109,7 +110,8 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
     here onto this year's walk window. It is computed once per instrument
     rather than per year, so it is passed in whole and sliced, never
     recomputed (see backtest/pipeline.py's docstring for why per-window
-    computation would be wrong).
+    computation would be wrong). liq is the LiquidityUniverse from that same
+    bundle, under the identical contract and sliced by the same offset.
 
     Returns (learning_weights, rows). rows are journal-ready dicts, each still
     carrying "factor_results", which save_journal strips on the way to CSV.
@@ -138,17 +140,21 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
     # walk_df has already been reset_index'ed and its own index says
     # nothing about where it sits in the instrument's history.
     window_obs = None
-    if obs is not None and "h1_index" in walk_df.columns:
+    window_liq = None
+    if "h1_index" in walk_df.columns:
         window_start = int(walk_df["h1_index"].iloc[0])
-        window_obs = slice_universe(
-            obs, window_start, window_start + len(walk_df)
-        )
+        window_stop = window_start + len(walk_df)
+        if obs is not None:
+            window_obs = slice_universe(obs, window_start, window_stop)
+        if liq is not None:
+            window_liq = slice_liquidity(liq, window_start, window_stop)
 
     ctx = build_market_context(
         walk_df,
         pip_size,
         m15_df=_window(m15_df, start, end + tail),
         obs=window_obs,
+        liq=window_liq,
     )
 
     # find_signals runs over the whole walk frame and the tail's signals are

@@ -12,7 +12,12 @@ penetration depths readable at a glance.
 
 import pytest
 
-from smc.order_blocks.order_blocks import TOUCH_LIMIT, _apply_touch_lifecycle
+from smc.order_blocks.order_blocks import (
+    OB_LOOKBACK,
+    TOUCH_LIMIT,
+    _apply_mitigation,
+    _apply_touch_lifecycle,
+)
 
 TOP = 20.0
 BOTTOM = 10.0
@@ -26,6 +31,9 @@ def make_ob(direction="bullish", trigger=0):
         "top": TOP,
         "bottom": BOTTOM,
         "earliest_trigger_index": trigger,
+        "mitigated": False,
+        "mitigated_index": None,
+        "mitigated_date": None,
         "invalidated": False,
         "invalidated_index": None,
         "invalidated_from_index": None,
@@ -50,6 +58,20 @@ def run(lows, highs=None, break_up=None, break_down=None, direction="bullish"):
         break_down or [False] * n,
     )
     return ob
+
+
+def run_mitigation(lows, highs=None):
+    """Applies only the mitigation scan, which carries the same bound."""
+    n = len(lows)
+    highs = highs if highs is not None else [OUTSIDE_ABOVE] * n
+    ob = make_ob()
+    _apply_mitigation([ob], highs, lows, list(range(n)))
+    return ob
+
+
+def quiet(n):
+    """n candles that never come near the zone."""
+    return [OUTSIDE_ABOVE] * n
 
 
 class TestEqRule:
@@ -128,6 +150,84 @@ class TestStructureBreakRule:
         breaks = [False, False, True]
         ob = run([OUTSIDE_ABOVE, 19.0, OUTSIDE_ABOVE], break_down=breaks)
         assert not ob["invalidated"]
+
+
+class TestExpiryRule:
+    """The OB_LOOKBACK bound.
+
+    The other three rules all need price to do something. This one exists
+    precisely for the zone price never came back to, which
+    "structure_break" deliberately refuses to kill and which would
+    otherwise stay valid forever and keep surfacing as a target.
+
+    Every fixture triggers at index 0, so the expiry candle is OB_LOOKBACK.
+    """
+
+    def test_an_untouched_zone_expires_a_lookback_after_its_trigger(self):
+        ob = run(quiet(OB_LOOKBACK + 2))
+        assert ob["invalidated"]
+        assert ob["invalidated_rule"] == "expired"
+        assert ob["invalidated_index"] == OB_LOOKBACK
+        assert ob["touch_count"] == 0
+
+    def test_the_expiry_candle_is_still_inside_the_valid_window(self):
+        """Same x-plus-one gap as the other three rules, so ob_state's
+        valid_through needs no special case for this one.
+        """
+        ob = run(quiet(OB_LOOKBACK + 2))
+        assert ob["invalidated_from_index"] == ob["invalidated_index"] + 1
+
+    def test_data_running_out_early_is_not_expiry(self):
+        """Not knowing yet and being dead are different facts. A zone whose
+        lookback has not finished inside the available history is still
+        live, or the live bot would lose its newest zones every run.
+        """
+        ob = run(quiet(OB_LOOKBACK // 2))
+        assert not ob["invalidated"]
+
+    def test_the_bound_is_exclusive_at_the_last_candle(self):
+        """Right on the boundary: the expiry candle has to EXIST in the
+        data, not merely be the index one past its end.
+        """
+        assert not run(quiet(OB_LOOKBACK))["invalidated"]
+        assert run(quiet(OB_LOOKBACK + 1))["invalidated_rule"] == "expired"
+
+    def test_a_rule_that_fires_first_keeps_its_own_label(self):
+        lows = quiet(50) + [MIDPOINT] + quiet(OB_LOOKBACK)
+        ob = run(lows)
+        assert ob["invalidated_rule"] == "eq"
+        assert ob["invalidated_index"] == 50
+
+    def test_a_rule_firing_on_the_last_candle_before_expiry_still_wins(self):
+        lows = quiet(OB_LOOKBACK - 1) + [MIDPOINT] + quiet(2)
+        ob = run(lows)
+        assert ob["invalidated_rule"] == "eq"
+        assert ob["invalidated_index"] == OB_LOOKBACK - 1
+
+    def test_a_rule_firing_on_the_expiry_candle_itself_still_wins(self):
+        """The zone is live THROUGH its expiry candle, so a touch there is
+        a real touch rather than a post-mortem.
+        """
+        lows = quiet(OB_LOOKBACK) + [MIDPOINT] + quiet(2)
+        ob = run(lows)
+        assert ob["invalidated_rule"] == "eq"
+        assert ob["invalidated_index"] == OB_LOOKBACK
+
+
+class TestMitigationBound:
+    """_apply_mitigation carries the identical bound, so the table cannot
+    report a mitigation on a candle the zone was already dead for.
+    """
+
+    def test_a_touch_after_expiry_is_not_a_mitigation(self):
+        lows = quiet(OB_LOOKBACK + 1) + [MIDPOINT] + quiet(2)
+        assert not run_mitigation(lows)["mitigated"]
+
+    def test_a_touch_on_the_expiry_candle_still_counts(self):
+        lows = quiet(OB_LOOKBACK) + [MIDPOINT] + quiet(2)
+        ob = run_mitigation(lows)
+        assert ob["mitigated"]
+        assert ob["mitigated_index"] == OB_LOOKBACK
 
 
 class TestTheXPlusOneRule:

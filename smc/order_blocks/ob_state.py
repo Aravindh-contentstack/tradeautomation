@@ -27,6 +27,10 @@ tf_duration is one hour, which reproduces exactly the
 `range(earliest_trigger_index + 1, n)` start that _apply_mitigation
 already uses.
 
+That expression now lives in smc/timeline.py, since smc/liquidity/
+liq_state.py needs the identical rule and a second copy of it is precisely
+the drift this paragraph exists to prevent.
+
 Liveness is stored as index THRESHOLDS per OB (visible_from,
 valid_through), never as lifetime booleans. That is what makes it safe to
 build this over full history and then window it per backtest year: the
@@ -39,15 +43,28 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-DAILY_DURATION = pd.Timedelta(days=1)
-H4_DURATION = pd.Timedelta(hours=4)
-H1_DURATION = pd.Timedelta(hours=1)
+from smc.timeline import (
+    DAILY_DURATION,
+    H1_DURATION,
+    H4_DURATION,
+    TIMEFRAME_DURATIONS,
+    to_h1_index as _to_h1_index,
+)
 
-TIMEFRAME_DURATIONS = {
-    "Daily": DAILY_DURATION,
-    "4H": H4_DURATION,
-    "H1": H1_DURATION,
-}
+# Re-exported: several callers and tests import these from here, which is
+# where they lived before smc/timeline.py existed.
+__all__ = [
+    "DAILY_DURATION",
+    "H4_DURATION",
+    "H1_DURATION",
+    "TIMEFRAME_DURATIONS",
+    "ObSeries",
+    "ObUniverse",
+    "QUALITY_COLUMNS",
+    "to_h1_space",
+    "build_ob_universe",
+    "slice_universe",
+]
 
 # Quality columns carried onto ObSeries. Each is a fixed property of the
 # OB settled at its own trigger (see order_block_quality.py's docstring),
@@ -62,8 +79,19 @@ QUALITY_COLUMNS = [
     "swept_liquidity_swing",
     "swept_liquidity_internal",
     "swept_liquidity_fractal",
+    "swept_liquidity_old_point",
+    "swept_liquidity_equals",
+    "swept_liquidity_lrlq",
     "swept_liquidity_fvg",
     "swept_liquidity_previous_candle",
+    # H1 only. An H1 sweep of a session or daily/weekly level only counts
+    # when it produced an order block, so these live on the zone rather
+    # than in a gate of their own. See order_block_quality.py's docstring.
+    "swept_liquidity_asian",
+    "swept_liquidity_london",
+    "swept_liquidity_ny",
+    "swept_liquidity_previous_day",
+    "swept_liquidity_previous_week",
     "within_daily_ob",
     "within_h4_ob",
 ]
@@ -115,24 +143,6 @@ class ObUniverse:
     target_above: dict
     target_below: dict
     mitigated_htf: dict
-
-
-def _to_h1_index(values, tf_dates, h1_ts, tf_duration, n, missing):
-    """Maps a column of timeframe-local indices to H1 positions.
-
-    A local index i means "that timeframe's candle i", which finishes at
-    tf_dates[i] + tf_duration and is therefore readable from the first H1
-    bar at or after that instant. Missing entries (never mitigated, never
-    invalidated) map to `missing`, chosen by the caller so the resulting
-    array can be compared against a bar number without a null check.
-    """
-    out = np.full(len(values), missing, dtype=np.int64)
-    for row, value in enumerate(values):
-        if value is None or (isinstance(value, float) and np.isnan(value)):
-            continue
-        close_time = tf_dates[int(value)] + tf_duration
-        out[row] = min(int(np.searchsorted(h1_ts, close_time, side="left")), n)
-    return out
 
 
 def to_h1_space(ob_table, tf_dates, h1_ts, timeframe):

@@ -37,6 +37,22 @@ LONDON_END_HOUR = 10
 NY_START_HOUR = 12
 NY_END_HOUR = 15
 
+# The Asian range, midnight to 04:00 London. Unlike the two above it is NOT
+# a killzone: nothing is ever entered during it. It is here because its high
+# and low are liquidity the London and NY sessions go hunting for, which
+# smc/liquidity/time_levels.py reads, and because putting a fourth session
+# anywhere else would mean a second London clock in the codebase.
+ASIAN_START_HOUR = 0
+ASIAN_END_HOUR = 4
+
+# Every session as (start, end) in London civil hours, end-exclusive.
+# Ordered as they occur in the trading day.
+SESSION_HOURS = {
+    "asian": (ASIAN_START_HOUR, ASIAN_END_HOUR),
+    "london": (LONDON_START_HOUR, LONDON_END_HOUR),
+    "ny": (NY_START_HOUR, NY_END_HOUR),
+}
+
 # 19:00 London is the user's hard trade-management checkpoint: every open
 # position is either moved to breakeven (if in profit) or cut (if not).
 LONDON_CUTOFF_HOUR = 19
@@ -64,6 +80,21 @@ def london_fields(dates):
     hour = local.dt.hour.to_numpy(dtype=np.int8)
     dow = local.dt.dayofweek.to_numpy(dtype=np.int8)
     return hour, dow
+
+
+def london_calendar(dates):
+    """Vectorised (London civil date, hour) for a series of UTC instants.
+
+    The date half is what session grouping needs and london_fields does not
+    provide: an H1 bar at 23:00 UTC in summer belongs to the NEXT London
+    day, and grouping on the UTC date would put it in the wrong session
+    day exactly often enough to be hard to spot.
+
+    Returns (dates as a datetime64[ns] numpy array of local midnights,
+    hours as int8).
+    """
+    local = to_london(pd.Series(pd.DatetimeIndex(dates))).dt.tz_localize(None)
+    return local.dt.normalize().to_numpy(), local.dt.hour.to_numpy(dtype=np.int8)
 
 
 def london_cutoff_utc(dates):

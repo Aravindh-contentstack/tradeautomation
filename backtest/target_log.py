@@ -32,22 +32,64 @@ import os
 import pandas as pd
 
 from backtest.context import bar_timestamp
-from backtest.entry_ob import TARGET_SEARCH_R
+from backtest.entry_ob import TARGET_SEARCH_R, WEEKLY_TARGET_SEARCH_R
 from backtest.factors import (
     CONTAINMENT_FACTOR,
     OB_QUALITY_FACTORS,
     SWEPT_LIQUIDITY_FACTORS,
+    TARGET_GATE_CHILDREN,
+    TARGET_GATE_H1_CHILDREN,
+    evaluate_liquidity_target_factors,
     evaluate_ob_target_factors,
 )
 
 TIMEFRAMES = ["Daily", "4H", "H1"]
 
-# Ordered. Append only: reordering reinterprets stored masks.
+# Ordered, as (gate, factor suffix). APPEND ONLY: reordering silently
+# reinterprets every stored mask.
+#
+# The first twelve are spelled out rather than derived, because they are the
+# positions any already-stored log was written against. Deriving them from
+# SWEPT_LIQUIDITY_FACTORS was fine while that list was frozen; it grew from
+# five entries to thirteen with the liquidity work, which would have pushed
+# swept_liquidity from bit 9 to bit 17 and the two containment bits along
+# with it. Everything new goes on the end instead.
+_ORIGINAL_BITS = [
+    ("ob_target", "caused_displacement"),
+    ("ob_target", "caused_imbalance"),
+    ("ob_target", "has_inducement"),
+    ("ob_target", "flip_zone"),
+    ("ob_target", "swept_liquidity_swing"),
+    ("ob_target", "swept_liquidity_internal"),
+    ("ob_target", "swept_liquidity_fractal"),
+    ("ob_target", "swept_liquidity_fvg"),
+    ("ob_target", "swept_liquidity_previous_candle"),
+    ("ob_target", "swept_liquidity"),
+    ("ob_target", "within_daily_ob"),
+    ("ob_target", "within_h4_ob"),
+]
+
+# Two gates share the table because they answer the same question about the
+# same trade, and the liquidity half is arguably the more interesting one:
+# an OB target that gets reached flips to opposing, while a liquidity target
+# that gets reached simply disappears, and "how fast does the fuel run out"
+# is exactly what this log exists to make answerable.
 TARGET_LOG_BITS = (
-    [suffix for suffix, _ in OB_QUALITY_FACTORS]
-    + [suffix for suffix, _ in SWEPT_LIQUIDITY_FACTORS]
-    + ["swept_liquidity"]
-    + sorted(set(CONTAINMENT_FACTOR.values()))
+    _ORIGINAL_BITS
+    + [
+        ("ob_target", suffix)
+        for suffix, _ in OB_QUALITY_FACTORS + SWEPT_LIQUIDITY_FACTORS
+        if ("ob_target", suffix) not in _ORIGINAL_BITS
+    ]
+    + [
+        ("ob_target", column)
+        for column in sorted(set(CONTAINMENT_FACTOR.values()))
+        if ("ob_target", column) not in _ORIGINAL_BITS
+    ]
+    + [
+        ("liquidity_target", child)
+        for child in TARGET_GATE_CHILDREN + TARGET_GATE_H1_CHILDREN
+    ]
 )
 
 TARGET_LOG_COLUMNS = [
@@ -84,8 +126,8 @@ def _pack(factor_results, prefix):
     """
     answers = 0
     present = 0
-    for bit, suffix in enumerate(TARGET_LOG_BITS):
-        key = "%s_ob_target_%s" % (prefix, suffix)
+    for bit, (gate, suffix) in enumerate(TARGET_LOG_BITS):
+        key = "%s_%s_%s" % (prefix, gate, suffix)
         if key not in factor_results:
             continue
         present |= 1 << bit
@@ -113,6 +155,8 @@ def collect_target_log(ctx, signal, walk, trade_id):
     if end is None:
         end = start
     max_distance = TARGET_SEARCH_R * signal["r_distance"]
+    week_max_distance = WEEKLY_TARGET_SEARCH_R * signal["r_distance"]
+    liq = getattr(ctx, "liq", None)
 
     rows = []
     for k in range(start, min(end, obs.n - 1) + 1):
@@ -120,6 +164,12 @@ def collect_target_log(ctx, signal, walk, trade_id):
         low = float(ctx.low[k])
         results = evaluate_ob_target_factors(
             obs, k, signal["direction"], max_distance, high, low
+        )
+        results.update(
+            evaluate_liquidity_target_factors(
+                liq, k, signal["direction"], high, low,
+                max_distance, week_max_distance,
+            )
         )
         if not results:
             continue
@@ -159,9 +209,9 @@ def save_target_log(rows, path):
 
 
 def decode_mask(answers_mask, present_mask):
-    """A stored row back into {factor suffix: bool}, omissions dropped."""
+    """A stored row back into {"gate.suffix": bool}, omissions dropped."""
     out = {}
-    for bit, suffix in enumerate(TARGET_LOG_BITS):
+    for bit, (gate, suffix) in enumerate(TARGET_LOG_BITS):
         if present_mask & (1 << bit):
-            out[suffix] = bool(answers_mask & (1 << bit))
+            out["%s.%s" % (gate, suffix)] = bool(answers_mask & (1 << bit))
     return out

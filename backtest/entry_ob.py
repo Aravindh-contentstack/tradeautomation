@@ -50,6 +50,15 @@ SL_BUFFER_PIPS = 2.0
 # which is only free because the walk carries no TP dependence at all.
 TARGET_SEARCH_R = 5.0
 
+# Previous-week high/low reaches further than everything else, confirmed
+# with the user: 7.5R against 5R.
+#
+# The reason it earns the exception is that a weekly level is a bigger draw
+# than a session high or a single old point, so price is worth crediting for
+# heading toward one from further away. Every other liquidity kind, and
+# every order block, stays on TARGET_SEARCH_R.
+WEEKLY_TARGET_SEARCH_R = 7.5
+
 # Zones can be a few pips wide once _shape_zone trims a large candle to
 # its body. A stop that tight makes every R multiple enormous and turns
 # noise into apparent edge, so setups below this are dropped rather than

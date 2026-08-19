@@ -88,6 +88,26 @@ ATR_PERIOD = 14
 # at all; by the third there is too little left to expect one.
 TOUCH_LIMIT = 3
 
+# How long an OB stays live without any of the three touch/break rules
+# firing, counted from the candle it BECOMES KNOWN (earliest_trigger_index),
+# not from the anchor candle it is drawn on.
+#
+# Confirmed with the user, and it closes roadmap/supply-and-demand.md's open
+# "Lookback period" item. Rule 2 (structure break) deliberately does not kill
+# an untouched zone just because the market moved on, so without this bound a
+# never-touched OB from years ago stays valid forever and keeps surfacing in
+# ob_state's target sweep.
+#
+# Counted from the trigger rather than from formation because the anchor sits
+# in the PAST relative to the break that reveals it, sometimes by a whole leg.
+# Dating the clock from formation would hand a zone confirmed 120 candles late
+# a lifetime that had already run out, making it untradeable the moment it
+# became visible.
+#
+# The same 100 that smc/liquidity/fair_value_gaps.py uses, on every timeframe,
+# so zones, gaps and liquidity levels all age on one rule.
+OB_LOOKBACK = 100
+
 _OB_COLUMNS = [
     "timeframe",
     "direction",
@@ -270,16 +290,35 @@ def _shape_zone(anchor, direction, opens, highs, lows, closes, atr_series):
     return highs[anchor], lows[anchor], anchor
 
 
+def _expiry_index(ob, n):
+    """The last candle an untouched OB is still live on, or None when the
+    data runs out before OB_LOOKBACK candles have passed.
+
+    None rather than a clamp to n-1 on purpose. A clamp would mark a zone
+    invalidated merely because history ended, which would hide a genuinely
+    live OB from the live bot on the newest bar. Not knowing yet and being
+    dead are different facts, and only one of them is true here.
+    """
+    expiry = ob["earliest_trigger_index"] + OB_LOOKBACK
+    return expiry if expiry < n else None
+
+
 def _apply_mitigation(order_blocks, highs, lows, dates):
     """Fills in mitigated/mitigated_index/mitigated_date on each OB dict in
     place, scanning forward from the candle right after the EARLIEST
     trigger index across any tier that resolved to this anchor (not from
     formation, so the impulse leg that creates the OB is never mistaken for
     mitigating it).
+
+    Bounded at the same expiry as _apply_touch_lifecycle, so the table never
+    records a mitigation on a candle the zone was already dead for.
     """
     n = len(highs)
     for ob in order_blocks:
-        for k in range(ob["earliest_trigger_index"] + 1, n):
+        expiry = _expiry_index(ob, n)
+        scan_end = n if expiry is None else expiry + 1
+
+        for k in range(ob["earliest_trigger_index"] + 1, scan_end):
             if lows[k] <= ob["top"] and highs[k] >= ob["bottom"]:
                 ob["mitigated"] = True
                 ob["mitigated_index"] = k
@@ -310,7 +349,7 @@ def _apply_touch_lifecycle(order_blocks, highs, lows, dates, break_up, break_dow
     """Fills in the touch/invalidation state on each OB dict in place,
     scanning forward from the same start _apply_mitigation uses.
 
-    Three rules, whichever fires first, per the confirmed design in
+    Four rules, whichever fires first, per the confirmed design in
     roadmap/supply-and-demand.md's "Invalidation" section:
 
       "eq"              A wick reaches the OB's own midpoint. This
@@ -329,10 +368,21 @@ def _apply_touch_lifecycle(order_blocks, highs, lows, dates, break_up, break_dow
                         an up-break is only meaningful for a bullish OB
                         (price leaving it behind), never the break that
                         pushes down into one.
+      "expired"         OB_LOOKBACK candles have passed since the zone
+                        became known and none of the above fired. The
+                        catch-all that stops a never-touched zone staying
+                        valid forever, since "structure_break" explicitly
+                        does not kill one the market simply moved on from.
 
     A multi-bar stay inside the zone is ONE touch, not one per bar, so
-    `inside_run` latches until price leaves. Untouched OBs stay live
-    indefinitely; the roadmap's "Lookback period" bound is still open.
+    `inside_run` latches until price leaves.
+
+    Expiry is applied through the same _kill as the other three, so a zone is
+    live for exactly OB_LOOKBACK candles after its trigger and dead from the
+    next one. That reuses the "still tradeable ON the killing candle" offset
+    for a rule that has no reaction behind it, which is harmless: unlike an EQ
+    touch, nothing happens on an expiry candle, so the off-by-one only decides
+    whether the bound reads as 100 or 101 candles.
 
     break_up/break_down: per-candle booleans, the union across this
     timeframe's tiers of "break of swing high"/"break of swing low".
@@ -348,7 +398,10 @@ def _apply_touch_lifecycle(order_blocks, highs, lows, dates, break_up, break_dow
         deepest = None
         inside_run = False
 
-        for k in range(ob["earliest_trigger_index"] + 1, n):
+        expiry = _expiry_index(ob, n)
+        scan_end = n if expiry is None else expiry + 1
+
+        for k in range(ob["earliest_trigger_index"] + 1, scan_end):
             inside = lows[k] <= top and highs[k] >= bottom
 
             if inside:
@@ -377,6 +430,13 @@ def _apply_touch_lifecycle(order_blocks, highs, lows, dates, break_up, break_dow
             if touch_count > 0 and (break_up[k] if bullish else break_down[k]):
                 _kill(ob, k, dates, "structure_break")
                 break
+        else:
+            # The scan ran its full course without any rule firing. That
+            # means expiry, but only if there WAS an expiry candle to reach:
+            # when _expiry_index returns None the loop simply ran out of
+            # data, and the zone is still alive.
+            if expiry is not None:
+                _kill(ob, expiry, dates, "expired")
 
         ob["touch_count"] = touch_count
         ob["qualifying_touch_indices"] = touch_indices

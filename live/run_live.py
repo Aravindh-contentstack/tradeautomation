@@ -1,7 +1,7 @@
-"""Live trading loop for EUR_USD, running the exact same signal logic
-and trade management as backtest/ against live MT5 data, with real
-order placement and real position management gated by the safety
-guardrails in live/safety.py.
+"""Live trading loop, one process per instrument, running the exact
+same signal logic and trade management as backtest/ against live MT5
+data, with real order placement and real position management gated by
+the safety guardrails in live/safety.py.
 
 The strategy does not just set a stop-loss/take-profit and walk away:
 backtest/simulate.py actively manages every open trade at 19:00 London
@@ -10,12 +10,17 @@ everything by Friday 19:00 London. manage_open_trades() below runs that
 exact same schedule against real open MT5 positions, so live behaviour
 matches what was actually backtested.
 
-Run on the Windows VPS (see live/README.md for setup). Configure via
-environment variables - nothing sensitive is hardcoded:
+Run on the Windows VPS (see live/README.md for setup), one process per
+pair in live/pairs.py, e.g.:
+
+    python -u live/run_live.py EUR_USD
+
+Configure via environment variables - nothing sensitive is hardcoded:
 
     MT5_LOGIN, MT5_PASSWORD, MT5_SERVER   - your MT5 account credentials
-    MT5_SYMBOL                            - broker's exact symbol name (default EURUSD;
-                                             some brokers suffix it, e.g. EURUSD.a)
+    MT5_SYMBOL_SUFFIX                     - optional; appended to every pair's broker
+                                             symbol (e.g. ".a" if your broker quotes
+                                             EUR_USD as EURUSD.a, EUR_JPY as EURJPY.a, ...)
     MT5_TERMINAL_PATH                     - optional; the full path to terminal64.exe,
                                              only needed if MT5 can't auto-attach to the
                                              already-running terminal
@@ -49,11 +54,15 @@ from backtest.simulate import find_signals, tp_price_for
 from backtest.weights import load_weights
 
 from live import alerts, mt5_connector as connector, journal_live, risk, safety
+from live.pairs import PAIRS, magic_for
 
-INSTRUMENT = "EUR_USD"
-MT5_SYMBOL = os.environ.get("MT5_SYMBOL", "EURUSD")
+if len(sys.argv) != 2 or sys.argv[1] not in PAIRS:
+    sys.exit("Usage: python live/run_live.py <INSTRUMENT>, one of: %s" % ", ".join(PAIRS))
+
+INSTRUMENT = sys.argv[1]
+MT5_SYMBOL = INSTRUMENT.replace("_", "") + os.environ.get("MT5_SYMBOL_SUFFIX", "")
 PIP_SIZE = pip_size_for(INSTRUMENT)
-MAGIC = 20260808  # arbitrary fixed id tagging this bot's orders, distinct from any manual trades
+MAGIC = magic_for(INSTRUMENT)  # distinct per pair, so 10 processes on one account never collide
 
 DAILY_HISTORY_COUNT = 1000
 H4_HISTORY_COUNT = 1500
@@ -192,13 +201,16 @@ def reconcile_closed_trades():
 
 
 def run_once(state, settings, weights):
-    if safety.kill_switch_active():
+    if safety.kill_switch_active(INSTRUMENT):
         return state
 
     balance = connector.account_balance()
     state = safety.roll_daily_state(state, balance)
 
-    if safety.daily_loss_breached(state, balance):
+    day_start_utc = safety.trading_day_start_utc(datetime.now(timezone.utc))
+    pair_pnl_today = connector.today_realized_profit(MAGIC, day_start_utc) + connector.floating_profit(MAGIC)
+
+    if safety.daily_loss_breached(state, pair_pnl_today):
         if not state.get("breach_alerted"):
             alerts.send(
                 "Daily loss breaker tripped for %s (down %.2f%% of day-start balance). "

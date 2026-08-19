@@ -2,11 +2,21 @@
 order_blocks.py's output rather than folding into that module directly, per
 its own docstring's "deliberately out of scope" list.
 
-Covers 9 of the 11 factors the user asked for (Old Points liquidity and
-Equals are explicitly deferred, needing detectors that don't exist yet).
 Caused Imbalance and Caused Displacement need no code here: they already
 exist as columns on order_blocks.py's output, just corrected there for
 multi-candle zones.
+
+Swept-liquidity children come in two shapes. The structural ones (swing,
+internal, fractal) are derived from the structure columns; the rest come
+from the standalone detectors in smc/liquidity/ via apply_candle_sweeps,
+which takes any {(kind, side): per-candle bool array} and answers it over
+each OB's formation leg. That is how Old Points, Equals and LRLQ arrive,
+and on H1 the time-based kinds too.
+
+H1 is the reason the time-based kinds are OB-anchored rather than a gate of
+their own. Confirmed with the user: an H1 sweep that does not break
+structure produces no order block, and therefore nothing to trade from, so
+every H1 sweep has to be attached to a zone to mean anything.
 
 Every function here takes an OB DataFrame (as produced by
 compute_daily_order_blocks / compute_h4_order_blocks / compute_h1_order_
@@ -41,6 +51,9 @@ import pandas as pd
 BULLISH = "bullish"
 BEARISH = "bearish"
 
+HIGH = "high"
+LOW = "low"
+
 # One-third of the parent's own zone height, the confirmed containment
 # threshold when a child OB isn't fully engulfed by its parent.
 CONTAINMENT_MIN_OVERLAP_FRACTION = 1.0 / 3.0
@@ -65,6 +78,54 @@ def _tier_suffix(prefix):
     return prefix.rsplit("_", 1)[-1]
 
 
+def apply_candle_sweeps(order_blocks, per_candle, kinds):
+    """Adds one swept_liquidity_{kind} column per kind in `kinds`.
+
+    per_candle: {(kind, side): bool array over that timeframe's candles},
+        as produced by smc/liquidity/sweeps.py. "side" is which way price
+        had to travel to take the liquidity.
+    kinds: the kinds to emit columns for. A kind absent from per_candle is
+        skipped rather than erroring, so a caller running only part of the
+        stack still gets a usable table.
+
+    For each OB, scans [leg_start_index, earliest_trigger_index] (the leg
+    that produced it, regardless of which tier actually triggered it) for a
+    candle that took liquidity on the side the OB's own direction wants: a
+    demand zone is interesting because the sell stops UNDER the market were
+    run first, so a bullish OB looks for a low-side sweep.
+
+    Whether a given CANDLE swept something does not depend on which OB is
+    asking, so it is computed once (upstream) and answered per leg as a
+    range query here. A cumulative count turns "was there a sweep anywhere
+    in [a, b]" into one subtraction, instead of re-walking every leg candle
+    by candle, which matters because H1 carries tens of thousands of zones.
+    """
+    result = order_blocks.reset_index(drop=True).copy()
+    bullish = (result["direction"].to_numpy() == BULLISH)
+
+    if len(result) == 0:
+        for kind in kinds:
+            result["swept_liquidity_%s" % kind] = []
+        return result
+
+    leg_starts = result["leg_start_index"].to_numpy(dtype=int)
+    ends = result["earliest_trigger_index"].to_numpy(dtype=int) + 1
+
+    for kind in kinds:
+        low_side = per_candle.get((kind, LOW))
+        high_side = per_candle.get((kind, HIGH))
+        if low_side is None or high_side is None:
+            continue
+
+        cum_low = np.concatenate(([0], np.cumsum(low_side)))
+        cum_high = np.concatenate(([0], np.cumsum(high_side)))
+        any_low = (cum_low[ends] - cum_low[leg_starts]) > 0
+        any_high = (cum_high[ends] - cum_high[leg_starts]) > 0
+        result["swept_liquidity_%s" % kind] = np.where(bullish, any_low, any_high)
+
+    return result
+
+
 def compute_swept_liquidity_structural(order_blocks, structured_df, tier_prefixes):
     """Adds swept_liquidity_swing/internal/fractal (one column per prefix
     in tier_prefixes, named by its tier suffix).
@@ -74,50 +135,17 @@ def compute_swept_liquidity_structural(order_blocks, structured_df, tier_prefixe
     currently holding T's trend (swing_low while T is bullish, swing_high
     while T is bearish) is the strong point being checked for a sweep.
 
-    For each OB and each tier T, scans [leg_start_index,
-    earliest_trigger_index] (the leg that produced the OB, regardless of
-    which tier actually triggered it) for a candle that wicks beyond T's
-    own currently-active strong point while T's structure stays on that
-    side. A close beyond the level can't happen without T's own structure
-    flipping that same candle (market_structure.py's own invariant), so no
-    separate close check is needed here.
+    The per-candle test lives in smc/liquidity/sweeps.structural_sweeps,
+    which the standalone Swept Liquidity gate reads too. This function is
+    the OB-anchored view of the same fact: the same candles, asked about
+    over one order block's formation leg.
     """
-    df = structured_df.reset_index(drop=True)
-    highs = df["high"].to_numpy(dtype=float)
-    lows = df["low"].to_numpy(dtype=float)
+    from smc.liquidity.sweeps import structural_sweeps
 
-    result = order_blocks.reset_index(drop=True).copy()
-    bullish = (result["direction"].to_numpy() == BULLISH)
-    leg_starts = result["leg_start_index"].to_numpy(dtype=int)
-    trigger_ends = result["earliest_trigger_index"].to_numpy(dtype=int)
-
-    for prefix in tier_prefixes:
-        structure = df["%s_structure" % prefix].to_numpy()
-        swing_low = pd.to_numeric(df["%s_swing_low" % prefix], errors="coerce").to_numpy()
-        swing_high = pd.to_numeric(df["%s_swing_high" % prefix], errors="coerce").to_numpy()
-
-        # Whether each CANDLE sweeps its tier's strong point does not
-        # depend on which OB is asking, so it is computed once per tier
-        # and then answered per leg as a range query. A cumulative count
-        # turns "was there a sweep anywhere in [a, b]" into one
-        # subtraction, instead of re-walking every leg candle by candle.
-        # NaN comparisons are False, which is the wanted behaviour during
-        # warm-up when no pivot is confirmed yet.
-        with np.errstate(invalid="ignore"):
-            sweeps_bull = (structure == BULLISH) & (lows < swing_low)
-            sweeps_bear = (structure == BEARISH) & (highs > swing_high)
-
-        cum_bull = np.concatenate(([0], np.cumsum(sweeps_bull)))
-        cum_bear = np.concatenate(([0], np.cumsum(sweeps_bear)))
-
-        ends = trigger_ends + 1
-        any_bull = (cum_bull[ends] - cum_bull[leg_starts]) > 0
-        any_bear = (cum_bear[ends] - cum_bear[leg_starts]) > 0
-        result["swept_liquidity_%s" % _tier_suffix(prefix)] = np.where(
-            bullish, any_bull, any_bear
-        )
-
-    return result
+    per_candle = structural_sweeps(structured_df, tier_prefixes)
+    return apply_candle_sweeps(
+        order_blocks, per_candle, [_tier_suffix(prefix) for prefix in tier_prefixes]
+    )
 
 
 def compute_fvg_confluence(order_blocks, fvg_table, ohlc_df):

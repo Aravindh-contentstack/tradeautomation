@@ -7,7 +7,7 @@ constants.
 
 import math
 
-RISK_PER_TRADE = 0.001  # 0.1% of current balance, per user decision.
+RISK_PER_TRADE = 0.002  # 0.2% of current balance, per user decision.
 
 # If the broker's minimum tradeable lot alone would risk more than this
 # multiple of the intended RISK_PER_TRADE, the trade is skipped instead

@@ -135,6 +135,76 @@ def _passes_atr_filter(pivot_value, opposite_value, atr, min_atr_separation):
     return abs(pivot_value - opposite_value) >= min_atr_separation * atr
 
 
+_PIVOT_COLUMNS = [
+    "side",
+    "pivot_index",
+    "pivot_price",
+    "confirmed_index",
+    "confirmed_date",
+]
+
+
+def compute_fractal_pivots(df, n=2):
+    """Every confirmed fractal pivot as its own row, rather than as a
+    running "latest confirmed" column.
+
+    compute_fractal_swing_structure below answers "what is the current
+    pivot on each side", which is what structure and premium/discount
+    need. The liquidity detectors need the opposite: the full list of
+    pivots, each one only once. Walking that function's swing_high column
+    for changes is not a substitute, because two consecutive pivots at the
+    same price leave the column unchanged and would silently merge into
+    one.
+
+    Runs the identical _is_up_fractal / _is_down_fractal tests, so this
+    cannot drift from the structure tiers' idea of what a pivot is. The
+    manual_restart and min_atr_separation machinery is deliberately absent:
+    both are off everywhere, and neither is meaningful for a liquidity
+    level, which is a fact about where price turned rather than about a
+    structure state machine.
+
+    df: DataFrame of OHLC candles (date, open, high, low, close), ascending.
+    n: the fractal scale, same meaning as everywhere else in this module.
+
+    Returns a DataFrame with one row per pivot, columns per _PIVOT_COLUMNS,
+    sorted by confirmed_index. A candle can legitimately produce both a high
+    and a low pivot, in which case it appears twice.
+
+    confirmed_index is pivot_index + n, the first candle the pivot could
+    have been known on. Nothing downstream may read a pivot before it,
+    which is the same no-lookahead rule the structure columns obey by
+    applying a pivot at i + n rather than at i.
+    """
+    df = df.reset_index(drop=True)
+    length = len(df)
+
+    highs = df["high"].tolist()
+    lows = df["low"].tolist()
+    dates = df["date"].tolist()
+
+    pivots = []
+    for i in range(length):
+        if i + n >= length:
+            break
+        if _is_up_fractal(highs, i, n):
+            pivots.append(("high", i, highs[i]))
+        if _is_down_fractal(lows, i, n):
+            pivots.append(("low", i, lows[i]))
+
+    rows = [
+        {
+            "side": side,
+            "pivot_index": pivot_index,
+            "pivot_price": price,
+            "confirmed_index": pivot_index + n,
+            "confirmed_date": dates[pivot_index + n],
+        }
+        for side, pivot_index, price in pivots
+    ]
+    rows.sort(key=lambda row: row["confirmed_index"])
+    return pd.DataFrame(rows, columns=_PIVOT_COLUMNS)
+
+
 def compute_fractal_swing_structure(
     df,
     n=2,

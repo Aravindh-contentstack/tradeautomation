@@ -8,37 +8,38 @@ Daily,Mitigation OB,Swept Liquidity,Swing,0.865
 Daily,Mitigation OB,Swept Liquidity,Internal,0.865
 Daily,Mitigation OB,Swept Liquidity,Fractal,0.865
 Daily,Mitigation OB,Swept Liquidity,Old Points,0.865
-Daily,Mitigation OB,Swept Liquidity,FVG Liquidity,0.865
 Daily,Mitigation OB,Swept Liquidity,Equals,0.865
+Daily,Mitigation OB,Swept Liquidity,LRLQ,1.0
+Daily,Mitigation OB,Swept Liquidity,FVG Liquidity,0.865
 Daily,Mitigation OB,Swept Liquidity,Previous Candle H/L,1
 Daily,Mitigation OB,,Has Inducement,1.501
 Daily,Mitigation OB,,Caused Imbalance,1.423
 Daily,Mitigation OB,,Caused Displacement,1
 Daily,Mitigation OB,,Flip Zone,1
+Daily,OB Target,,Swept Liquidity,0.976
+Daily,OB Target,Swept Liquidity,Swing,0.972
+Daily,OB Target,Swept Liquidity,Internal,0.972
+Daily,OB Target,Swept Liquidity,Fractal,0.972
+Daily,OB Target,Swept Liquidity,Old Points,0.972
+Daily,OB Target,Swept Liquidity,Equals,0.972
+Daily,OB Target,Swept Liquidity,LRLQ,1.0
+Daily,OB Target,Swept Liquidity,FVG Liquidity,0.972
+Daily,OB Target,Swept Liquidity,Previous Candle H/L,1
+Daily,OB Target,,Has Inducement,0.881
+Daily,OB Target,,Caused Imbalance,1.073
+Daily,OB Target,,Caused Displacement,1
+Daily,OB Target,,Flip Zone,1
 Daily,Swept Liquidity,Structural Liquidity,Swing,1.239
 Daily,Swept Liquidity,Structural Liquidity,Internal,1.239
 Daily,Swept Liquidity,Structural Liquidity,Fractal,1.239
 Daily,Swept Liquidity,Structural Liquidity,Old Points,1.239
 Daily,Swept Liquidity,,Equals,1.1
 Daily,Swept Liquidity,,FVG,0.996
-Daily,OB Target,,Swept Liquidity,0.976
-Daily,OB Target,Swept Liquidity,Swing,0.972
-Daily,OB Target,Swept Liquidity,Internal,0.972
-Daily,OB Target,Swept Liquidity,Fractal,0.972
-Daily,OB Target,Swept Liquidity,Old Points,0.972
-Daily,OB Target,Swept Liquidity,FVG Liquidity,0.972
-Daily,OB Target,Swept Liquidity,Equals,0.972
-Daily,OB Target,Swept Liquidity,Previous Candle H/L,1
-Daily,OB Target,,Has Inducement,0.881
-Daily,OB Target,,Caused Imbalance,1.073
-Daily,OB Target,,Caused Displacement,1
-Daily,OB Target,,Flip Zone,1
+Daily,Swept Liquidity,,LRLQ,1.0
+Daily,Swept Liquidity,,Previous Week H/L,1.0
 Daily,Liquidity Target,,Equals,0.851
 Daily,Liquidity Target,,Low Resistance Liquidity,0.948
 Daily,Liquidity Target,,FVG Liquidity,1.213
-Daily,Liquidity Target,Structural Liquidity,Swing,0.783
-Daily,Liquidity Target,Structural Liquidity,Internal,0.783
-Daily,Liquidity Target,Structural Liquidity,Fractal,0.783
 Daily,Liquidity Target,Structural Liquidity,Old Points,0.783
 4H,Always,,Swing,0.719
 4H,Always,,Internal,0.98
@@ -50,39 +51,40 @@ Daily,Liquidity Target,Structural Liquidity,Old Points,0.783
 4H,Mitigation OB,Swept Liquidity,Internal,0.615
 4H,Mitigation OB,Swept Liquidity,Fractal,0.615
 4H,Mitigation OB,Swept Liquidity,Old Points,0.615
-4H,Mitigation OB,Swept Liquidity,FVG Liquidity,0.615
 4H,Mitigation OB,Swept Liquidity,Equals,0.615
-4H,Mitigation OB,Swept Liquidity,Previous Candle,1
+4H,Mitigation OB,Swept Liquidity,LRLQ,1.0
+4H,Mitigation OB,Swept Liquidity,FVG Liquidity,0.615
+4H,Mitigation OB,Swept Liquidity,Previous Candle H/L,1
 4H,Mitigation OB,,Has Inducement,1.099
 4H,Mitigation OB,,Caused Imbalance,0.72
 4H,Mitigation OB,,Caused Displacement,1
 4H,Mitigation OB,,Flip Zone,2.048
 4H,Mitigation OB,,Within Daily OB,1
+4H,OB Target,,Swept Liquidity,1.2177
+4H,OB Target,Swept Liquidity,Swing,1.254
+4H,OB Target,Swept Liquidity,Internal,1.254
+4H,OB Target,Swept Liquidity,Fractal,1.254
+4H,OB Target,Swept Liquidity,Old Points,1.254
+4H,OB Target,Swept Liquidity,Equals,1.254
+4H,OB Target,Swept Liquidity,LRLQ,1.0
+4H,OB Target,Swept Liquidity,FVG Liquidity,1.254
+4H,OB Target,Swept Liquidity,Previous Candle H/L,1
+4H,OB Target,,Has Inducement,1.026
+4H,OB Target,,Caused Imbalance,1.133
+4H,OB Target,,Caused Displacement,1
+4H,OB Target,,Flip Zone,1
+4H,OB Target,,Within Daily OB,1
 4H,Swept Liquidity,Structural Liquidity,Swing,0.839
 4H,Swept Liquidity,Structural Liquidity,Internal,0.839
 4H,Swept Liquidity,Structural Liquidity,Fractal,0.839
 4H,Swept Liquidity,Structural Liquidity,Old Points,0.839
 4H,Swept Liquidity,,Equals,0.853
 4H,Swept Liquidity,,FVG,1.216
-4H,OB Target,,Swept Liquidity,1.2177
-4H,OB Target,Swept Liquidity,Swing,1.254
-4H,OB Target,Swept Liquidity,Internal,1.254
-4H,OB Target,Swept Liquidity,Fractal,1.254
-4H,OB Target,Swept Liquidity,Old Points,1.254
-4H,OB Target,Swept Liquidity,FVG Liquidity,1.254
-4H,OB Target,Swept Liquidity,Equals,1.254
-4H,OB Target,Swept Liquidity,Previous Candle,1
-4H,OB Target,,Has Inducement,1.026
-4H,OB Target,,Caused Imbalance,1.133
-4H,OB Target,,Caused Displacement,1
-4H,OB Target,,Flip Zone,1
-4H,OB Target,,Within Daily OB,1
+4H,Swept Liquidity,,LRLQ,1.0
+4H,Swept Liquidity,,Previous Day H/L,1.0
 4H,Liquidity Target,,Equals,0.767
 4H,Liquidity Target,,Low Resistance Liquidity,0.988
 4H,Liquidity Target,,FVG Liquidity,0.85
-4H,Liquidity Target,Structural Liquidity,Swing,0.869
-4H,Liquidity Target,Structural Liquidity,Internal,0.869
-4H,Liquidity Target,Structural Liquidity,Fractal,0.869
 4H,Liquidity Target,Structural Liquidity,Old Points,0.869
 H1,Always,,Swing,1.614
 H1,Always,,Internal,1.202
@@ -93,30 +95,34 @@ H1,Mitigation OB,Swept Liquidity,Swing,1.326
 H1,Mitigation OB,Swept Liquidity,Internal,1.326
 H1,Mitigation OB,Swept Liquidity,Fractal,1.326
 H1,Mitigation OB,Swept Liquidity,Old Points,1.326
-H1,Mitigation OB,Swept Liquidity,FVG Liquidity,1.326
 H1,Mitigation OB,Swept Liquidity,Equals,1.326
-H1,Mitigation OB,Swept Liquidity,Previous Candle,1
+H1,Mitigation OB,Swept Liquidity,LRLQ,1.0
+H1,Mitigation OB,Swept Liquidity,FVG Liquidity,1.326
+H1,Mitigation OB,Swept Liquidity,Previous Candle H/L,1
+H1,Mitigation OB,Swept Liquidity,Asian Liquidity,1.0
+H1,Mitigation OB,Swept Liquidity,London Liquidity,1.0
+H1,Mitigation OB,Swept Liquidity,NY Liquidity,1.0
+H1,Mitigation OB,Swept Liquidity,Previous Day H/L,1.0
+H1,Mitigation OB,Swept Liquidity,Previous Week H/L,1.0
 H1,Mitigation OB,,Has Inducement,1.091
 H1,Mitigation OB,,Caused Imbalance,1.702
 H1,Mitigation OB,,Caused Displacement,1
 H1,Mitigation OB,,Flip Zone,1.892
 H1,Mitigation OB,,Within 4H OB,1
-H1,Swept Liquidity,Structural Liquidity,Swing,0.757
-H1,Swept Liquidity,Structural Liquidity,Internal,0.757
-H1,Swept Liquidity,Structural Liquidity,Fractal,0.757
-H1,Swept Liquidity,Structural Liquidity,Old Points,0.757
-H1,Swept Liquidity,,Equals,0.946
-H1,Swept Liquidity,,FVG,1
-H1,Swept Liquidity,,Asian Liquidity,1.465
-H1,Swept Liquidity,,PDH/PDL,1
 H1,OB Target,,Swept Liquidity,0.984
 H1,OB Target,Swept Liquidity,Swing,0.984
 H1,OB Target,Swept Liquidity,Internal,0.984
 H1,OB Target,Swept Liquidity,Fractal,0.984
 H1,OB Target,Swept Liquidity,Old Points,0.984
-H1,OB Target,Swept Liquidity,FVG Liquidity,0.984
 H1,OB Target,Swept Liquidity,Equals,0.984
-H1,OB Target,Swept Liquidity,Previous Candle,1
+H1,OB Target,Swept Liquidity,LRLQ,1.0
+H1,OB Target,Swept Liquidity,FVG Liquidity,0.984
+H1,OB Target,Swept Liquidity,Previous Candle H/L,1
+H1,OB Target,Swept Liquidity,Asian Liquidity,1.0
+H1,OB Target,Swept Liquidity,London Liquidity,1.0
+H1,OB Target,Swept Liquidity,NY Liquidity,1.0
+H1,OB Target,Swept Liquidity,Previous Day H/L,1.0
+H1,OB Target,Swept Liquidity,Previous Week H/L,1.0
 H1,OB Target,,Has Inducement,1.088
 H1,OB Target,,Caused Imbalance,0.931
 H1,OB Target,,Caused Displacement,1
@@ -125,12 +131,12 @@ H1,OB Target,,Within 4H OB,1
 H1,Liquidity Target,,Equals,1.271
 H1,Liquidity Target,,Low Resistance Liquidity,1.297
 H1,Liquidity Target,,FVG Liquidity,1.05
-H1,Liquidity Target,,Asian Liquidity,1.056
-H1,Liquidity Target,,PDH/PDL,1
-H1,Liquidity Target,Structural Liquidity,Swing,0.995
-H1,Liquidity Target,Structural Liquidity,Internal,0.995
-H1,Liquidity Target,Structural Liquidity,Fractal,0.995
 H1,Liquidity Target,Structural Liquidity,Old Points,0.995
+H1,Liquidity Target,,Asian Liquidity,1.056
+H1,Liquidity Target,,London Liquidity,1.0
+H1,Liquidity Target,,NY Liquidity,1.0
+H1,Liquidity Target,,Previous Day H/L,1.0
+H1,Liquidity Target,,Previous Week H/L,1.0
 H1,Liquidity Target,,NWOG,1.6
 Entry,LC-1,,H1 OB is fractal,1.127
 Entry,LC-1,,Wicked the LID,1.072

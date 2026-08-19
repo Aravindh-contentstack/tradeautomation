@@ -21,16 +21,20 @@ from datetime import datetime, timedelta, timezone
 DAILY_RESET_HOUR_UTC = 0  # VERIFY against your prop firm's actual daily reset time.
 MAX_DAILY_LOSS_PCT = 0.02  # VERIFY this sits below your prop firm's real daily loss limit.
 
-PAUSE_FILE = os.path.join("live", "PAUSE")
+
+def pause_file(instrument):
+    return os.path.join("live", "PAUSE_%s" % instrument)
 
 
-def kill_switch_active():
-    """True if a `live/PAUSE` file exists. Create it (e.g. `touch
-    live/PAUSE`) to stop the bot from opening new trades without killing
-    the process - it keeps monitoring/journaling/reconciling existing
-    trades. Delete the file to resume.
+def kill_switch_active(instrument):
+    """True if a `live/PAUSE_<INSTRUMENT>` file exists. Create it (e.g.
+    `touch live/PAUSE_EUR_USD`) to stop that pair's bot from opening new
+    trades without killing the process - it keeps monitoring/journaling/
+    reconciling its existing trades. Delete the file to resume. Each
+    pair's process only ever checks its own pause file, so pausing one
+    pair never affects the other 9.
     """
-    return os.path.exists(PAUSE_FILE)
+    return os.path.exists(pause_file(instrument))
 
 
 def _trading_day_for(now_utc):
@@ -40,6 +44,17 @@ def _trading_day_for(now_utc):
     """
     shifted = now_utc - timedelta(hours=DAILY_RESET_HOUR_UTC)
     return shifted.date().isoformat()
+
+
+def trading_day_start_utc(now_utc):
+    """The UTC instant the current trading day began, per
+    DAILY_RESET_HOUR_UTC - the lower bound callers pass to
+    mt5_connector.today_realized_profit() so each pair's own realized
+    P&L is scoped to just today, not its whole trade history.
+    """
+    shifted = now_utc - timedelta(hours=DAILY_RESET_HOUR_UTC)
+    day_start_shifted = datetime(shifted.year, shifted.month, shifted.day, tzinfo=timezone.utc)
+    return day_start_shifted + timedelta(hours=DAILY_RESET_HOUR_UTC)
 
 
 def load_state(path):
@@ -68,11 +83,17 @@ def roll_daily_state(state, current_balance):
     return state
 
 
-def daily_loss_breached(state, current_balance):
+def daily_loss_breached(state, pair_pnl_today):
+    """Breached when THIS pair's own today P&L (realized + floating,
+    scoped to its own magic number) is down more than MAX_DAILY_LOSS_PCT
+    of the account's day-start balance - not the account's overall
+    balance change, so one pair losing money doesn't trip the breaker
+    for the other 9 pairs sharing the same account.
+    """
     day_start = state.get("day_start_balance")
     if not day_start:
         return False
-    loss_pct = (day_start - current_balance) / day_start
+    loss_pct = -pair_pnl_today / day_start
     return loss_pct >= MAX_DAILY_LOSS_PCT
 
 

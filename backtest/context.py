@@ -53,9 +53,10 @@ class MarketContext:
     pip_size: float
     m15: object                 # M15Index, or None when M15 is unavailable
     obs: object = None          # ObUniverse rebased on this window, or None
+    liq: object = None          # LiquidityUniverse on the same window, or None
 
 
-def build_market_context(year_df, pip_size, m15_df=None, obs=None):
+def build_market_context(year_df, pip_size, m15_df=None, obs=None, liq=None):
     """Builds the MarketContext for one instrument-year.
 
     year_df must carry date/open/high/low/close, be sorted ascending, and
@@ -71,6 +72,12 @@ def build_market_context(year_df, pip_size, m15_df=None, obs=None):
     only sees the windowed frame and cannot know its offset into full
     history. None means no OB state, which the signal engine treats as
     "no candidates" rather than an error.
+
+    liq is a LiquidityUniverse under the identical contract (see
+    liq_state.slice_universe). None means the two liquidity gates are
+    omitted from scoring entirely, which is the same dynamic exclusion a
+    timeframe with nothing to say already gets, so an older caller that
+    passes no liquidity scores exactly as it did before.
     """
     year_df = year_df.reset_index(drop=True)
 
@@ -106,6 +113,7 @@ def build_market_context(year_df, pip_size, m15_df=None, obs=None):
         pip_size=pip_size,
         m15=build_m15_index(dates, m15_df),
         obs=obs,
+        liq=liq,
     )
 
 

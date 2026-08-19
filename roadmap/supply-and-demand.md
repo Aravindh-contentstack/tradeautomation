@@ -115,13 +115,56 @@ offer. The code keeps the two apart as `invalidated_index` (the candle the
 event happened on) and `invalidated_from_index` (the first dead candle), and
 `ob_state.py`'s `valid_through` carries the rule so no caller re-derives it.
 
-**Lookback period (new concept, TBD, not yet defined).** Because rule 2
+**Lookback period (CONFIRMED and IMPLEMENTED 2026-08-19).** Because rule 2
 explicitly does NOT invalidate an untouched OB just because the market moved
-on, untouched OBs could in principle pile up forever and all remain
-"technically still valid." A lookback period is needed: some bound on how far
-back an unmitigated OB can be and still be considered live, versus being
-treated as stale/obsolete purely due to age. Value and exact definition
-deferred to a later session.
+on, untouched OBs would otherwise pile up forever and all remain "technically
+still valid." A fourth invalidation rule, `"expired"`, bounds that:
+
+- **100 candles**, as `order_blocks.OB_LOOKBACK`. The same number
+  `smc/liquidity/fair_value_gaps.py` already uses, and the same one the
+  liquidity levels in `roadmap/liquidity.md` use, so zones, gaps and levels all
+  age on one rule. The same 100 on every timeframe, which is deliberately not
+  the same amount of calendar time (about five months on Daily, about four days
+  on H1).
+- **Counted from `earliest_trigger_index`**, the candle the zone becomes known,
+  NOT from the anchor candle it is drawn on. The anchor sits in the past
+  relative to the break that reveals it, sometimes by a whole leg, so dating
+  the clock from formation would hand a zone confirmed 120 candles late a
+  lifetime that had already run out, making it untradeable the moment it became
+  visible.
+- **Applied through the same `_kill`** as the other three rules, so the zone is
+  live for exactly 100 candles after its trigger and dead from the next one,
+  and `ob_state.py`'s `valid_through` needs no special case.
+- **Data running out early is not expiry.** When fewer than 100 candles exist
+  after the trigger, the OB stays alive rather than being clamped dead, since
+  "not knowable yet" and "dead" are different facts and only the first is true.
+  Without this the live bot would lose its newest zones on every run.
+
+`_apply_mitigation` carries the identical bound, so the table never records a
+mitigation on a candle the zone was already dead for.
+
+**Measured impact**, entry candidates over 2020 to 2025, before against
+after, on flat 1.0 weights:
+
+| Pair | Before | After | Change |
+|---|---|---|---|
+| EUR_USD | 886 | 791 | -10.7% |
+| AUD_USD | 881 | 761 | -13.6% |
+| EUR_JPY | 807 | 700 | -13.3% |
+| GBP_JPY | 889 | 784 | -11.8% |
+| GBP_USD | 953 | 836 | -12.3% |
+| NZD_USD | 911 | 799 | -12.3% |
+| USD_CAD | 960 | 854 | -11.0% |
+| USD_CHF | 834 | 737 | -11.6% |
+| USD_JPY | 769 | 683 | -11.2% |
+| XAU_USD | 866 | 784 | -9.5% |
+| **All** | **8756** | **7739** | **-11.6%** |
+
+Consistent across every pair and every year, which is what a bound on age
+should look like: it removes a steady tail of stale zones rather than
+reshaping the strategy. This is the baseline every later comparison is
+measured against, since it is the only change in the liquidity work that
+moves candidate counts at all.
 
 **`caused_imbalance` (confirmed and IMPLEMENTED 2026-08-05).** A plain 3-candle FVG check
 anchored directly on the OB, no distance search like `newphewSam.py`'s
@@ -361,10 +404,9 @@ What's left:
 - Run the full walk-forward on the new trigger and compare against the
   archived pre-change results. First single-year check on EUR_USD 2024 gives
   144 candidates against roughly 76 under the old trigger.
-- **Lookback period** (below) is still unimplemented, so a never-touched OB
-  from years ago stays live forever and will surface in the target sweep.
-- `Old Points` and `Equals` swept-liquidity sub-factors still have no
-  detectors, and are omitted from scoring rather than answered "no".
+- `Old Points`, `Equals` and `LRLQ` swept-liquidity sub-factors now have
+  detectors (`smc/liquidity/`), and H1 additionally carries the five
+  time-based kinds. See `roadmap/liquidity.md`.
 - Decide whether to bootstrap initial weights from `factors/*.csv` instead
   of the current flat 1.0. Those numbers were tuned against different factor
   definitions on the old trigger, so seeding them now would make year-one
