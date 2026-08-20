@@ -97,6 +97,18 @@ class LiquidityUniverse:
     bar's close, or NaN where there is none. Prices rather than row ids
     because the gate only ever needs the distance, and a price survives
     windowing without any rebasing.
+
+    mitigation_credit[(kind, side)] holds the PRICE of the surviving swept
+    level whose credit is still alive on each bar, or NaN where none is, from
+    smc/liquidity/sweep_credit.py. Keyed without a timeframe because the fact
+    is H1-only by construction: the chain rule measures from the sweeping
+    candle's own high, and a Daily candle's high is a whole day of range.
+
+    The low side holds a MAX and the high side a MIN, which is the opposite of
+    what the names suggest and is explained in sweep_credit.py's docstring:
+    eligible liquidity sits ABOVE a demand zone, so the highest surviving
+    low-side level is the useful one. None means the gate is omitted from
+    scoring entirely rather than answering no.
     """
 
     n: int
@@ -104,6 +116,7 @@ class LiquidityUniverse:
     swept_last_candle: dict
     target_above: dict
     target_below: dict
+    mitigation_credit: dict = None
 
 
 def _empty_series(timeframe, kind):
@@ -423,7 +436,9 @@ def carry_to_h1(per_candle, last_closed, n):
     return out
 
 
-def build_liquidity_universe(series_by_key, swept_by_key, closes, swing_ranges=None):
+def build_liquidity_universe(
+    series_by_key, swept_by_key, closes, swing_ranges=None, mitigation_credit=None
+):
     """Assembles the per-candle lookup arrays from the converted series.
 
     series_by_key: {(timeframe, kind): LevelSeries}
@@ -434,6 +449,12 @@ def build_liquidity_universe(series_by_key, swept_by_key, closes, swing_ranges=N
         Only the old_point series consults it, and only because that is part
         of the definition of an old point. Omitted means no filtering, which
         is what every other kind wants.
+    mitigation_credit: {(kind, side): float array of length n} from
+        sweep_credit.build_mitigation_leg_credit. Already in H1 index space,
+        so it is passed through untouched. Deliberately NOT routed through
+        carry_to_h1: that shifts to the last CLOSED candle, which is right for
+        a higher timeframe and wrong here, because the sweeping candle is
+        allowed to be the entry candle itself.
     """
     n = len(closes)
     target_above = {}
@@ -458,6 +479,7 @@ def build_liquidity_universe(series_by_key, swept_by_key, closes, swing_ranges=N
         swept_last_candle=swept_by_key,
         target_above=target_above,
         target_below=target_below,
+        mitigation_credit=mitigation_credit,
     )
 
 
@@ -499,4 +521,16 @@ def slice_universe(universe, start, stop):
         target_below={
             key: values[start:stop] for key, values in universe.target_below.items()
         },
+        # A plain slice, with no rebasing: these arrays carry the ANSWER (the
+        # surviving level's price) rather than the indices it was derived
+        # from, so a chain that opened long before the window still reports
+        # correctly inside it. That is what keeps the live path, which keeps
+        # only the last 200 bars, in step with a full-history backtest.
+        mitigation_credit=(
+            None if universe.mitigation_credit is None
+            else {
+                key: values[start:stop]
+                for key, values in universe.mitigation_credit.items()
+            }
+        ),
     )

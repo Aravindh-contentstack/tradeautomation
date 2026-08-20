@@ -93,6 +93,64 @@ whether it belongs in `build_setup` (reject the candidate outright,
 alongside `MIN_R_PIPS`) or as a new scored factor instead of a hard
 rejection.
 
+## Assumptions inside the H1 mitigation-leg swept gate (noted 2026-08-20)
+
+Full design and rationale:
+`~/.claude/plans/assume-there-is-a-logical-ripple.md`. The gate itself is
+built (`smc/liquidity/sweep_credit.py`, and see `roadmap/liquidity.md`). What
+follows are the five places its rules were CHOSEN rather than derived, each
+recorded so a later change is a decision rather than a rediscovery.
+
+**ATR is frozen at the sweep candle S.** The `3 x ATR(14)` spend test reads
+the ATR at S and holds it for the life of the chain. Reading each bar's own
+ATR instead would make the threshold breathe, so a credit could die purely
+because volatility rose. Freezing it is also what lets "whichever kill
+condition fires first, permanently" be a structural guarantee: the two
+conditions become one contiguous band on the close, answered by a single
+forward scan, rather than two pieces of bookkeeping that have to agree.
+
+**The 3x ATR anchor never resets.** For a bullish OB the reference stays at
+`high[S]` even if a later candle inside the band prints a higher high. This
+follows the rule as stated and only makes the spend condition harder to reach,
+so it errs conservative, but a resetting anchor is defensible and untested.
+
+**The old-point external-to-swing-range filter is kept.** This gate reuses
+`smc/liquidity/sweeps.py`'s `external` predicate, so "old point" means the
+same thing here as on the Mitigation OB and Daily/4H gates. Dropping it would
+admit more credits but make the three gates' `old_points` answers
+incomparable with each other.
+
+**A previous-day low can score twice, deliberately.** One swept during
+formation AND still credited at mitigation emits both
+`h1_mitigation_ob_swept_liquidity_previous_day` and
+`h1_mitigation_leg_swept_liquidity_previous_day`. They are different facts
+about different legs, weeks apart, and the weights learn them separately, but
+it is a real correlation between two factors rather than two independent
+signals. Worth knowing before reading either weight.
+
+**The close-through rule is the tightest constraint in the design.** Credit
+survives only if no candle from S through the entry bar closes beyond the
+swept level, and the entry candle is included. That forces the zone to sit
+within roughly one H1 wick's reach of the level, so the gate is a rare
+high-conviction signal rather than a common one.
+
+**Measured fire rate, EUR_USD 2021 to 2025:** 71 of 660 candidates carry at
+least one child yes, or 10.8%, ranging from 6.6% in 2023 to 16.5% in 2025.
+That is the number the close-through worry above was about, and it settles it:
+the gate discriminates rather than firing on everything or nothing, so no
+loosening is called for. Per child, as a share of all candidates: london 5.3%,
+asian 3.9%, previous day 2.0%, LRLQ 1.8%, equals 1.1%, NY 0.6%, old points
+0.6%.
+
+**Two children have no evidence yet.** `previous_week` never fired once in
+five years, and `old_points` fired four times. Both are real rules rather than
+dead code, but their learned weights will stay near their 1.0 seed for a long
+while, so treat either weight as unproven rather than as a finding. If
+`previous_week` is still at zero after another instrument, the question worth
+asking is whether a weekly level is simply never within one H1 wick of an
+order block, which would make it structurally unreachable for this gate
+rather than merely rare.
+
 ## Lookback period for untouched OBs (still open, noted 2026-08-04)
 
 Carried over from `roadmap/supply-and-demand.md`. Because the structure-break

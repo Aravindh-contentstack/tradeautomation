@@ -54,6 +54,14 @@ TIMEFRAMES = ["Daily", "4H", "H1"]
 # five entries to thirteen with the liquidity work, which would have pushed
 # swept_liquidity from bit 9 to bit 17 and the two containment bits along
 # with it. Everything new goes on the end instead.
+#
+# Bit 7 (swept_liquidity_fvg) changed WHEN it evaluates true partway through
+# this list's own life, not its position: it now goes silent once the swept
+# gap's own 100-candle lookback runs out (order_block_quality.py's
+# compute_fvg_confluence). Any target-log parquet written before that fix
+# reflects the old, never-stale reading for this one bit. None exist yet
+# under data/target_log/ as of this change, so nothing needs regenerating,
+# but a file written earlier would need it if one is ever created.
 _ORIGINAL_BITS = [
     ("ob_target", "caused_displacement"),
     ("ob_target", "caused_imbalance"),

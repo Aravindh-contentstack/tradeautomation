@@ -484,6 +484,15 @@ const computeSweptLiquidityStructural = (orderBlocks, obHistHigh, obHistLow, tie
 // true if the OB's own formation candles wick into a same-direction FVG
 // that was already active before the OB formed, without closing past the
 // FVG's far edge. ----
+//
+// The Python side later added a staleness gate here (this factor goes
+// silent once the swept gap's own 100-candle lookback runs out unfilled,
+// since months can pass between an OB forming and it actually being
+// mitigated). NOT ported here: this file only computes and labels the
+// static per-OB fact for the TradingView indicator, it has no bar-by-bar
+// factor-scoring engine (no mitigation_ob/probability computation
+// anywhere in fxrscripts/), so the staleness bug this gate fixes cannot
+// occur in this context. Port it if a scored consumer is ever added here.
 const computeFvgConfluence = (orderBlocks, fvgs, obHistClose) => {
   for (let x = 0; x < orderBlocks.length; x++) {
     const ob = orderBlocks[x];

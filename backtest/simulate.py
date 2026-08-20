@@ -65,6 +65,7 @@ from backtest.factors import (
     evaluate_liquidity_target_factors,
     evaluate_mitigation_ob_factors,
     evaluate_ob_target_factors,
+    evaluate_mitigation_leg_swept_factors,
     evaluate_swept_liquidity_factors,
 )
 from backtest.killzone import (
@@ -150,6 +151,20 @@ def find_signals(ctx, weights, pip_size):
         mitigation_factor_results.update(
             evaluate_swept_liquidity_factors(
                 getattr(ctx, "liq", None), entry_index, direction
+            )
+        )
+        # What the H1 approach leg took on its way in, which neither gate
+        # above can see: the OB's own swept columns froze at its trigger,
+        # possibly weeks earlier, and the standalone gate only looks at the
+        # last closed Daily or 4H candle. Scored at entry_index, so a
+        # killzone-deferred entry is judged on the bar it actually enters on.
+        mitigation_factor_results.update(
+            evaluate_mitigation_leg_swept_factors(
+                getattr(ctx, "liq", None),
+                entry_index,
+                direction,
+                float(ctx.obs.series["H1"].top[ob_row]),
+                float(ctx.obs.series["H1"].bottom[ob_row]),
             )
         )
 

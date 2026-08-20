@@ -109,6 +109,15 @@ H1,Mitigation OB,,Caused Imbalance,1.0239
 H1,Mitigation OB,,Caused Displacement,0.9266
 H1,Mitigation OB,,Flip Zone,0.7579
 H1,Mitigation OB,,Within 4H OB,0.8382
+H1,Mitigation Leg,,Swept Liquidity,1.0
+H1,Mitigation Leg,Swept Liquidity,Old Points,1.0
+H1,Mitigation Leg,Swept Liquidity,Equals,1.0
+H1,Mitigation Leg,Swept Liquidity,LRLQ,1.0
+H1,Mitigation Leg,Swept Liquidity,Asian Liquidity,1.0
+H1,Mitigation Leg,Swept Liquidity,London Liquidity,1.0
+H1,Mitigation Leg,Swept Liquidity,NY Liquidity,1.0
+H1,Mitigation Leg,Swept Liquidity,Previous Day H/L,1.0
+H1,Mitigation Leg,Swept Liquidity,Previous Week H/L,1.0
 H1,OB Target,,Swept Liquidity,1.0886
 H1,OB Target,Swept Liquidity,Swing,1
 H1,OB Target,Swept Liquidity,Internal,0.9975

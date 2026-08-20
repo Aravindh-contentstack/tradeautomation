@@ -40,9 +40,17 @@ earliest_trigger_date where the two tables are on different timeframes
 and indices are not comparable). The result is that every column here is
 a fixed property of the OB, settled once at its trigger and never
 revisited, which is what lets the Mitigation OB's factors freeze at entry
-without any per-candle recomputation. The single exception is
+without any per-candle recomputation. Two exceptions:
+
 flip_zone, which by definition cannot be known that early; it carries a
 flip_zone_known_from index so callers can gate on it instead.
+
+swept_liquidity_fvg, whose matched gap can go on living independently of
+the OB for months after the OB's own formation, and can die of its own
+accord (its 100-candle lookback simply running out) long before the OB is
+ever mitigated. It carries a swept_liquidity_fvg_stale_from_index (the
+gap's own expiry_index) so callers can gate it the other way round: not
+"not yet knowable," but "no longer fresh."
 """
 
 import numpy as np
@@ -153,12 +161,43 @@ def compute_fvg_confluence(order_blocks, fvg_table, ohlc_df):
     wick into a same-direction FVG that was already active (unfilled,
     within its validity window) before the OB formed, without any of
     those candles closing past the FVG's far edge.
+
+    Also adds swept_liquidity_fvg_stale_from_index: the matched gap's own
+    expiry_index (that timeframe's own row space, None where no gap
+    matched), the second exception (after flip_zone) to this module's
+    otherwise-frozen-forever quality columns.
+
+    Confirmed with the user: this factor must go stale once the swept
+    gap's own 100-candle clock runs out unfilled, since months can pass
+    between an OB forming and it actually being mitigated and scored, and
+    the gap it touched at formation can independently die in the
+    meantime. Deliberately expiry_index, not active_until_index: the "did
+    the OB touch this gap" test above reads CLOSES, while the gap's own
+    "filled" rule (fair_value_gaps.py) reads WICKS, so an OB's formation
+    candles can satisfy this test while ALSO being exactly what fills the
+    gap (a long wick, a small body). active_until_index would then equal
+    the OB's own formation candle, making the factor go stale immediately
+    rather than surviving to a later mitigation. Confirmed with the user
+    that a fill, by the OB itself, by the OB's own later mitigation
+    candle, or by anyone else, must never shorten this factor's life.
+    Only the gap's own unconditional age limit may: expiry_index is fixed
+    at formed_index + lookback regardless of whether or when the gap is
+    ever filled, which is exactly the property wanted here. This also
+    keeps the gap's lifecycle and the OB's own invalidation lifecycle
+    fully independent of each other; neither one's state may be read
+    while computing the other's.
+
+    swept_liquidity_fvg_stale_from_index is read straight off the SAME
+    match this function already finds; the matching/eligibility logic
+    itself is untouched, so which OBs get True and which specific gap
+    each one matches is unchanged.
     """
     closes = ohlc_df.reset_index(drop=True)["close"].to_numpy(dtype=float)
 
     result = order_blocks.reset_index(drop=True).copy()
     if len(result) == 0 or len(fvg_table) == 0:
         result["swept_liquidity_fvg"] = [False] * len(result)
+        result["swept_liquidity_fvg_stale_from_index"] = [None] * len(result)
         return result
 
     gaps = fvg_table.reset_index(drop=True)
@@ -167,6 +206,7 @@ def compute_fvg_confluence(order_blocks, fvg_table, ohlc_df):
     g_bottom = gaps["bottom"].to_numpy(dtype=float)
     g_formed = gaps["formed_index"].to_numpy(dtype=float)
     g_until = gaps["active_until_index"].to_numpy(dtype=float)
+    g_expiry = gaps["expiry_index"].to_numpy(dtype=float)
 
     ob_bullish = (result["direction"].to_numpy() == BULLISH)
     ob_top = result["top"].to_numpy(dtype=float)
@@ -179,6 +219,7 @@ def compute_fvg_confluence(order_blocks, fvg_table, ohlc_df):
     # far-edge check, which is a handful of bars at most and usually finds
     # its answer on the first candidate.
     column = np.zeros(len(result), dtype=bool)
+    stale_from = [None] * len(result)
     for i in range(len(result)):
         anchor = int(ob_anchor[i])
         eligible = (
@@ -200,9 +241,11 @@ def compute_fvg_confluence(order_blocks, fvg_table, ohlc_df):
                 breached = bool((window > g_top[j]).any())
             if not breached:
                 column[i] = True
+                stale_from[i] = int(g_expiry[j])
                 break
 
     result["swept_liquidity_fvg"] = column
+    result["swept_liquidity_fvg_stale_from_index"] = stale_from
     return result
 
 

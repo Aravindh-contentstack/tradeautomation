@@ -8,9 +8,13 @@ Five families, all scored the same way once answered:
   direction (premium for a short, discount for a long).
 - **Mitigation OB** (`MITIGATION_OB_FACTORS`): the qualities of the zone
   price reacted FROM. Answered once, at entry, and frozen for the life of
-  the trade.
+  the trade, with one exception: the `swept_liquidity_fvg` child goes
+  silent once the specific gap it swept has aged past its own 100-candle
+  lookback unfilled, since months can pass between an OB forming and it
+  actually being mitigated and scored. See `_ob_factor_answers`.
 - **OB Target** (`OB_TARGET_FACTORS`): the qualities of the nearest
-  opposite-direction zone price is being drawn TOWARD.
+  opposite-direction zone price is being drawn TOWARD. Carries the same
+  `swept_liquidity_fvg` exception as Mitigation OB above.
 - **Swept Liquidity** (`SWEPT_LIQUIDITY_GATE_FACTORS`): what the most
   recently closed Daily or 4H candle took out. Not anchored to any zone,
   and frozen at entry like the Mitigation OB gate.
@@ -219,6 +223,35 @@ def _target_gate_names():
 SWEPT_LIQUIDITY_GATE_FACTORS = _swept_gate_names()
 LIQUIDITY_TARGET_FACTORS = _target_gate_names()
 
+# --- The mitigation-leg gate, H1 only -----------------------------------
+#
+# The third swept-liquidity question, and the only one that looks at the leg
+# which actually delivered price back to the zone. The Mitigation OB gate
+# above describes the FORMATION leg and is frozen at the OB's trigger, which
+# may be weeks earlier; the standalone gate describes the last closed Daily or
+# 4H candle. Neither can say "the tap was preceded by a stop run on the
+# previous day's low".
+#
+# This does not contradict the rule that there is no standalone H1 Swept
+# Liquidity gate. That rule is about formation: an H1 sweep breaking no
+# structure produces no order block, so there is nothing to trade from. This
+# gate is anchored to a mitigation that has already happened.
+#
+# The children are the external and time-based kinds only. Structural kinds
+# are a formation-tier concept, and FVG is excluded because an order block's
+# own displacement leg leaves an imbalance directly in front of the zone,
+# so price cannot mitigate the block without sweeping it. Crediting that
+# would score caused_imbalance a second time under another name. Names that
+# can never be emitted are deliberately not created, per the note above.
+MITIGATION_LEG_CHILDREN = ["old_points", "equals", "lrlq", "asian", "london",
+                           "ny", "previous_day", "previous_week"]
+
+MITIGATION_LEG_FACTORS = (
+    ["h1_mitigation_leg_swept_liquidity_%s" % child
+     for child in MITIGATION_LEG_CHILDREN]
+    + ["h1_mitigation_leg_swept_liquidity"]
+)
+
 # Factor-name child to the `kind` string the detectors and liq_state use.
 # They differ in exactly one place, "old_points" against "old_point", which
 # is not worth renaming either side over: the factor sheet says Old Points
@@ -244,6 +277,7 @@ ALL_FACTORS = (
     + OB_TARGET_FACTORS
     + SWEPT_LIQUIDITY_GATE_FACTORS
     + LIQUIDITY_TARGET_FACTORS
+    + MITIGATION_LEG_FACTORS
 )
 
 
@@ -274,6 +308,20 @@ def _ob_factor_answers(series, ob_row, bar_index, prefix, gate, negate):
     higher than sweeping one. When it swept nothing at all, the parent
     alone is emitted as a no. Either way the untouched sub-types stay
     silent rather than each contributing a no.
+
+    The "fvg" child carries one further gate, the inverse of flip_zone's:
+    where flip_zone waits for a fact to become knowable, fvg's credit
+    expires once the specific gap it swept has aged past its own
+    100-candle lookback unfilled (series.fvg_stale_from, in H1-bar space).
+    Confirmed with the user this must be pure age, not fill status: a fill
+    of that gap, by this OB's own candles, by this OB's later mitigation
+    candle, or by anyone else at any time, never shortens the credit, only
+    the gap's own unconditional lookback may. Suppressing it here (before
+    `emit`, hence before `negate`) means a stale fvg reads as silent on
+    both the Mitigation OB and the OB Target gate, never as a flipped
+    "yes" on a reached target. This one check must never read the OB's
+    own invalidated state, and nothing about the OB's invalidation may
+    ever read fvg_stale_from: the two lifecycles are independent.
     """
     quality = series.quality
     results = {}
@@ -298,9 +346,16 @@ def _ob_factor_answers(series, ob_row, bar_index, prefix, gate, negate):
 
     swept_any = False
     for suffix, column in SWEPT_LIQUIDITY_FACTORS_BY_TF[series.timeframe]:
-        if column in quality and bool(quality[column][ob_row]):
-            emit(suffix, True)
-            swept_any = True
+        if column not in quality or not bool(quality[column][ob_row]):
+            continue
+        # The one end-boundary gate in this whole function; every other
+        # child here is a frozen fact. Kept as `>=` deliberately, the
+        # mirror of flip_zone's `<` above: this is an EXPIRY, not a
+        # not-yet-knowable start.
+        if suffix == "swept_liquidity_fvg" and bar_index >= series.fvg_stale_from[ob_row]:
+            continue
+        emit(suffix, True)
+        swept_any = True
     if not swept_any:
         emit("swept_liquidity", False)
 
@@ -440,6 +495,70 @@ def evaluate_swept_liquidity_factors(liq, bar_index, direction):
 
         if not swept_any:
             results["%s_swept_liquidity" % prefix] = False
+
+    return results
+
+
+def evaluate_mitigation_leg_swept_factors(liq, bar_index, direction,
+                                          ob_top, ob_bottom):
+    """What the H1 approach leg took on its way INTO the zone. H1 only.
+
+    Answers, per kind: is there a swept level whose credit is still alive on
+    this bar AND which sits on the far side of the zone from price. Both parts
+    matter.
+
+    The geometry is the part worth stating, because it reads backwards.
+    Eligible liquidity sits ABOVE a bullish order block. A demand zone at
+    1.0800-1.0820 with the previous day's low at 1.0830: price wicks below
+    1.0830, running the sell stops resting under it, then keeps falling into
+    the zone, where that sell-side liquidity is what fills the buy orders. Had
+    the level sat BELOW the zone, price would have to destroy the order block
+    to reach it and there would be no setup left. So a bullish OB wants a
+    LOW-side sweep (the stops under a low were run) whose level is ABOVE
+    ob_top, and liq_state's low-side array holds a MAX for exactly that
+    reason.
+
+    A level inside [ob_bottom, ob_top] is excluded too: taking it IS the
+    mitigation, not a separate stop run preceding it.
+
+    Credit expiry, the chain rule and the 3x ATR spend test all live in
+    smc/liquidity/sweep_credit.py, so this is array reads. Roll-up follows
+    every other swept gate: the kinds that survived are emitted as yes and
+    the parent is dropped, or the parent alone answers no.
+
+    Called with entry_index rather than the mitigation bar, which is what
+    makes the killzone deferral fall out for free: resolve_entry_bar returns
+    the bar whose CLOSE is the entry, and that is the bar whose close the
+    chain rule has to have survived. Frozen at entry by the caller.
+    """
+    if liq is None or getattr(liq, "mitigation_credit", None) is None:
+        return {}
+
+    side = _wanted_side(direction)
+    bullish = direction == "bullish"
+    results = {}
+
+    swept_any = False
+    for child in MITIGATION_LEG_CHILDREN:
+        prices = liq.mitigation_credit.get((KIND_FOR[child], side))
+        if prices is None:
+            continue
+        price = prices[bar_index]
+        # NaN means no credit of this kind survives on this bar. Tested by
+        # self-comparison to keep this module import-free, same as
+        # evaluate_liquidity_target_factors below.
+        if price != price:
+            continue
+        # The surviving extreme is the best candidate of its kind, so if it
+        # fails the zone test no level of that kind can pass it.
+        beyond = price > ob_top if bullish else price < ob_bottom
+        if not beyond:
+            continue
+        results["h1_mitigation_leg_swept_liquidity_%s" % child] = True
+        swept_any = True
+
+    if not swept_any:
+        results["h1_mitigation_leg_swept_liquidity"] = False
 
     return results
 

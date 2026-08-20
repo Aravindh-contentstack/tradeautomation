@@ -104,6 +104,17 @@ class ObSeries:
     An OB is usable on H1 bar k iff visible_from[j] <= k <= valid_through[j].
     valid_through absorbs the "still tradeable on the killing candle" rule
     from order_blocks._kill, so no caller has to remember a +1.
+
+    flip_known_from and fvg_stale_from are the two exceptions to
+    `quality`'s all-boolean contract: both carry an H1-space INDEX rather
+    than a bool, so each gets its own dedicated field instead of living in
+    the `quality` dict, which force-casts every entry to bool. The two
+    read in opposite directions: flip_known_from gates a fact not yet
+    knowable (bar_index < flip_known_from means "not yet"), fvg_stale_from
+    gates a fact that has stopped being fresh (bar_index >= fvg_stale_from
+    means "no longer"). See order_block_quality.py's module docstring for
+    why these two are the only quality columns that cannot simply freeze
+    at the OB's own trigger.
     """
 
     timeframe: str
@@ -115,6 +126,7 @@ class ObSeries:
     mitigated_at: np.ndarray
     valid_through: np.ndarray
     flip_known_from: np.ndarray
+    fvg_stale_from: np.ndarray
     touch_at: list
     quality: dict
     src_index: np.ndarray
@@ -170,6 +182,7 @@ def to_h1_space(ob_table, tf_dates, h1_ts, timeframe):
             mitigated_at=empty_i,
             valid_through=empty_i,
             flip_known_from=empty_i,
+            fvg_stale_from=empty_i,
             touch_at=[],
             quality={},
             src_index=empty_i,
@@ -211,6 +224,18 @@ def to_h1_space(ob_table, tf_dates, h1_ts, timeframe):
     else:
         flip_known_from = np.full(count, n, dtype=np.int64)
 
+    # n ("beyond the last valid H1 index") as the sentinel here means
+    # "never becomes stale within available data", the same reading it
+    # already has for flip_known_from: bar_index can never reach n, so the
+    # factor stays fresh for the whole window rather than being suppressed.
+    if "swept_liquidity_fvg_stale_from_index" in table.columns:
+        fvg_stale_from = _to_h1_index(
+            table["swept_liquidity_fvg_stale_from_index"].tolist(),
+            tf_dates, h1_ts, tf_duration, n, n,
+        )
+    else:
+        fvg_stale_from = np.full(count, n, dtype=np.int64)
+
     touch_at = [
         _to_h1_index(list(indices or []), tf_dates, h1_ts, tf_duration, n, n)
         for indices in table["qualifying_touch_indices"].tolist()
@@ -232,6 +257,7 @@ def to_h1_space(ob_table, tf_dates, h1_ts, timeframe):
         mitigated_at=mitigated_at,
         valid_through=valid_through,
         flip_known_from=flip_known_from,
+        fvg_stale_from=fvg_stale_from,
         touch_at=touch_at,
         quality=quality,
         src_index=np.arange(count, dtype=np.int64),
@@ -380,6 +406,20 @@ def _rebase_series(series, start, stop):
     clamped at the last bar for the mirror reason. Rows with no overlap at
     all are kept rather than filtered, so row ids stay stable and the
     per-bar arrays (which store row ids) need no remapping.
+
+    flip_known_from and fvg_stale_from share the (-1, length) clip bounds
+    despite gating in opposite directions, and both are correct under it.
+    A start-boundary (flip_known_from) already passed before the window
+    clips to -1, so every in-window bar_index (>= 0) is >= -1: the fact
+    reads as always-knowable, correct since it became knowable before the
+    window even began. An end-boundary (fvg_stale_from) already passed
+    before the window clips the SAME way, to -1, so every in-window
+    bar_index is >= -1 too: the fact reads as always-stale, correct since
+    it had already gone stale before the window began. A boundary beyond
+    the window clips to length for both fields, which no in-window
+    bar_index reaches, so a not-yet-knowable fact stays never-knowable
+    and a not-yet-stale fact stays never-stale, each correctly, for the
+    life of the window.
     """
     length = stop - start
     visible_from = np.clip(series.visible_from - start, 0, length)
@@ -394,6 +434,7 @@ def _rebase_series(series, start, stop):
         mitigated_at=np.clip(series.mitigated_at - start, -1, length),
         valid_through=valid_through,
         flip_known_from=np.clip(series.flip_known_from - start, -1, length),
+        fvg_stale_from=np.clip(series.fvg_stale_from - start, -1, length),
         touch_at=[np.clip(t - start, -1, length) for t in series.touch_at],
         quality=series.quality,
         src_index=series.src_index,

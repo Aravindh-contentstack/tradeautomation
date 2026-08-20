@@ -398,7 +398,7 @@ class TestTargets:
 
 
 class TestSliceUniverse:
-    def universe(self, n=10):
+    def universe(self, n=10, credit=True):
         series = LevelSeries(
             timeframe="H1", kind="equals",
             sign=np.array([ABOVE], dtype=np.int8),
@@ -408,12 +408,18 @@ class TestSliceUniverse:
             visible_from=np.array([3], dtype=np.int64),
             valid_through=np.array([7], dtype=np.int64),
         )
+        mitigation_credit = None
+        if credit:
+            mitigation_credit = {
+                ("equals", "low"): np.arange(n, dtype=float) + 100.0
+            }
         return liq_state.LiquidityUniverse(
             n=n,
             series={("H1", "equals"): series},
             swept_last_candle={("H1", "equals", "high"): np.arange(n) % 2 == 0},
             target_above={("H1", "equals"): np.arange(n, dtype=float)},
             target_below={("H1", "equals"): np.full(n, np.nan)},
+            mitigation_credit=mitigation_credit,
         )
 
     def test_a_window_rebases_every_index(self):
@@ -442,3 +448,26 @@ class TestSliceUniverse:
         full = self.universe()
         sliced = liq_state.slice_universe(full, 3, 9)
         assert sliced.series[("H1", "equals")].level[0] == 110.0
+
+    def test_mitigation_credit_is_windowed(self):
+        """Live parity. build_live_context keeps only the last 200 bars, so a
+        credit chain that opened months earlier has to still read correctly
+        inside the window. It does because the array carries the ANSWER (the
+        surviving level's price) rather than the indices behind it, so the
+        slice equals the full-history array over the same range.
+        """
+        full = self.universe()
+        sliced = liq_state.slice_universe(full, 3, 9)
+
+        expected = full.mitigation_credit[("equals", "low")][3:9]
+        np.testing.assert_array_equal(
+            sliced.mitigation_credit[("equals", "low")], expected
+        )
+        assert len(sliced.mitigation_credit[("equals", "low")]) == 6
+
+    def test_a_universe_without_mitigation_credit_slices_without_raising(self):
+        """Nothing constructs one of these any more, but the field carries a
+        default so older callers and fixtures keep working.
+        """
+        sliced = liq_state.slice_universe(self.universe(credit=False), 2, 8)
+        assert sliced.mitigation_credit is None

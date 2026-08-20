@@ -20,6 +20,7 @@ for as long as price stayed beyond it.
 import numpy as np
 import pandas as pd
 
+from smc.liquidity import levels, low_resistance
 from smc.liquidity.levels import EQUALS, OLD_POINT
 from smc.liquidity.low_resistance import LRLQ
 
@@ -82,31 +83,69 @@ def structural_sweeps(structured_df, tier_prefixes):
     return out
 
 
-def _scatter(table, length, kinds, keep=None):
-    """A level table's own swept_index column, as per-candle bool arrays.
+# One row per sweep EVENT, the shape the *_sweep_events functions below
+# return. The bool arrays the gates consume are a projection of this: they
+# keep only "some level of this kind was taken on this candle" and discard
+# which level and how long it had left to live.
+#
+# smc/liquidity/sweep_credit.py needs both of the discarded columns, so the
+# events are produced first and scattered second. Keeping one producer means
+# a level cannot be swept according to one consumer and not the other.
+#
+# expires_index is the level's own NATURAL expiry, the last candle it would
+# have lived to had nothing taken it. Deliberately not valid_through_index,
+# which for a swept level IS the sweep candle (ended_by == "swept") and would
+# cap every credit at zero candles.
+_EVENT_COLUMNS = ["kind", "side", "level", "swept_index", "expires_index"]
+
+
+def _events_frame(rows):
+    return pd.DataFrame(rows, columns=_EVENT_COLUMNS)
+
+
+def _table_sweep_events(table, kinds, lookback, keep=None):
+    """A level table's swept rows, as sweep events.
 
     keep: optional predicate (row, swept_index) -> bool, applied to rows
         that were swept. Used for the old-point range test below.
     """
-    out = {(kind, side): _blank(length) for kind in kinds for side in (HIGH, LOW)}
     if len(table) == 0:
-        return out
+        return _events_frame([])
 
+    rows = []
     for row in table.itertuples(index=False):
         if not row.swept or row.kind not in kinds:
             continue
         swept_index = int(row.swept_index)
         if keep is not None and not keep(row, swept_index):
             continue
-        out[(row.kind, row.side)][swept_index] = True
+        rows.append(
+            {
+                "kind": row.kind,
+                "side": row.side,
+                "level": float(row.level),
+                "swept_index": swept_index,
+                "expires_index": int(row.visible_from_index) + lookback,
+            }
+        )
+    return _events_frame(rows)
+
+
+def _scatter_events(events, length, kinds):
+    """Sweep events as per-candle bool arrays, one per (kind, side)."""
+    out = {(kind, side): _blank(length) for kind in kinds for side in (HIGH, LOW)}
+    for row in events.itertuples(index=False):
+        if row.kind not in kinds:
+            continue
+        out[(row.kind, row.side)][int(row.swept_index)] = True
     return out
 
 
-def pooled_level_sweeps(levels_table, structured_df, swing_prefix):
+def pooled_level_sweep_events(levels_table, structured_df, swing_prefix):
     """Equal highs/lows and old points, from smc/liquidity/levels.py.
 
     The table already resolved which candle took each level, against the
-    tolerance band rather than the bare price, so this is mostly a scatter
+    tolerance band rather than the bare price, so this is mostly a projection
     rather than a fresh scan.
 
     The exception is old points, which carry one condition the detector
@@ -137,12 +176,25 @@ def pooled_level_sweeps(levels_table, structured_df, swing_prefix):
             return bool(row.level > swing_high[swept_index])
         return bool(row.level < swing_low[swept_index])
 
-    return _scatter(levels_table, len(df), (EQUALS, OLD_POINT), keep=external)
+    return _table_sweep_events(
+        levels_table, (EQUALS, OLD_POINT), levels.DEFAULT_LOOKBACK, keep=external
+    )
+
+
+def lrlq_sweep_events(lrlq_table):
+    """Low resistance liquidity sweeps, as events."""
+    return _table_sweep_events(lrlq_table, (LRLQ,), low_resistance.DEFAULT_LOOKBACK)
+
+
+def pooled_level_sweeps(levels_table, structured_df, swing_prefix):
+    """The bool-array view of pooled_level_sweep_events."""
+    events = pooled_level_sweep_events(levels_table, structured_df, swing_prefix)
+    return _scatter_events(events, len(structured_df), (EQUALS, OLD_POINT))
 
 
 def lrlq_sweeps(lrlq_table, length):
-    """Low resistance liquidity, from smc/liquidity/low_resistance.py."""
-    return _scatter(lrlq_table, length, (LRLQ,))
+    """The bool-array view of lrlq_sweep_events."""
+    return _scatter_events(lrlq_sweep_events(lrlq_table), length, (LRLQ,))
 
 
 def fvg_sweeps(fvg_table, df):
@@ -175,7 +227,7 @@ def fvg_sweeps(fvg_table, df):
     return out
 
 
-def time_level_sweeps(time_table, kind, df):
+def time_level_sweep_events(time_table, kind, df):
     """The first candle inside each time level's window to take it.
 
     Unlike the pivot-derived kinds, these carry no sweep state of their own:
@@ -186,6 +238,11 @@ def time_level_sweeps(time_table, kind, df):
     Each level's window is resolved to a candle range by searchsorted, so a
     level is only ever taken by a candle that was actually inside its own
     validity window.
+
+    expires_index is the last candle of that same window, which for these
+    kinds is the natural cap rather than a lookback: time_levels.py already
+    encodes "live through the end of the FOLLOWING London day", so a session
+    level's credit inherits the clock it was built from.
     """
     frame = df.reset_index(drop=True)
     dates = pd.DatetimeIndex(frame["date"]).to_numpy()
@@ -193,10 +250,9 @@ def time_level_sweeps(time_table, kind, df):
     lows = frame["low"].to_numpy(dtype=float)
     length = len(frame)
 
-    out = {(kind, HIGH): _blank(length), (kind, LOW): _blank(length)}
     subset = time_table[time_table["kind"] == kind]
     if len(subset) == 0:
-        return out
+        return _events_frame([])
 
     starts = np.searchsorted(
         dates, pd.DatetimeIndex(subset["visible_from_date"]).to_numpy(), side="left"
@@ -205,16 +261,32 @@ def time_level_sweeps(time_table, kind, df):
         dates, pd.DatetimeIndex(subset["valid_through_date"]).to_numpy(), side="left"
     )
 
+    rows = []
     for row, (start, stop) in enumerate(zip(starts, stops)):
-        level = subset["level"].iloc[row]
+        level = float(subset["level"].iloc[row])
         side = subset["side"].iloc[row]
-        for k in range(int(start), min(int(stop), length)):
+        end = min(int(stop), length)
+        for k in range(int(start), end):
             taken = highs[k] > level if side == HIGH else lows[k] < level
             if taken:
-                out[(kind, side)][k] = True
+                rows.append(
+                    {
+                        "kind": kind,
+                        "side": side,
+                        "level": level,
+                        "swept_index": k,
+                        "expires_index": end - 1,
+                    }
+                )
                 break
 
-    return out
+    return _events_frame(rows)
+
+
+def time_level_sweeps(time_table, kind, df):
+    """The bool-array view of time_level_sweep_events."""
+    events = time_level_sweep_events(time_table, kind, df)
+    return _scatter_events(events, len(df), (kind,))
 
 
 def merge(*groups):

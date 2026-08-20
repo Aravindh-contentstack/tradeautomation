@@ -53,6 +53,11 @@ def main():
     order_blocks = compute_inducement(order_blocks)
     order_blocks = compute_flip_zone(order_blocks)
 
+    # These print the raw, pre-H1 formation-time facts, not the gated
+    # runtime factor backtest/factors.py actually scores. In particular
+    # swept_liquidity_fvg here is unaffected by staleness: this demo shows
+    # whether an OB touched a gap at formation, which never changes,
+    # regardless of what later happens to that gap or to the OB itself.
     print("Daily order blocks: %d" % len(order_blocks))
     for column in (
         "swept_liquidity_swing",

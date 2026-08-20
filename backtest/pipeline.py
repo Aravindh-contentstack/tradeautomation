@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 from backtest.context import build_market_context
-from smc.liquidity import liq_state, sweeps
+from smc.liquidity import liq_state, sweep_credit, sweeps
 from smc.liquidity.fair_value_gaps import compute_fair_value_gaps
 from smc.liquidity.levels import compute_liquidity_levels
 from smc.liquidity.low_resistance import compute_low_resistance_liquidity
@@ -98,7 +98,9 @@ SWEPT_TIME_KINDS = {
 # top of the structural three and the two that predate this work
 # (swept_liquidity_fvg, swept_liquidity_previous_candle). "fvg" is
 # deliberately absent: compute_fvg_confluence already owns that column and
-# applies a stricter test than a bare zone touch.
+# applies a stricter test than a bare zone touch. Its own staleness
+# bookkeeping (swept_liquidity_fvg_stale_from_index) travels with it
+# automatically, needing no entry here.
 OB_SWEEP_KINDS = {
     "Daily": ["old_point", "equals", "lrlq"],
     "4H": ["old_point", "equals", "lrlq"],
@@ -283,7 +285,22 @@ def _liquidity_universe(by_timeframe, time_levels, frames, merged, h1_ts, closes
         )
         for timeframe in by_timeframe
     }
-    return liq_state.build_liquidity_universe(series, swept, closes, swing_ranges)
+
+    # H1 only, and H1 IS the base timeline: merge_asof preserves the left
+    # frame row for row, so the H1 detectors' own row indices already ARE
+    # universe indices and no conversion belongs here. That is also why this
+    # is not carried through carry_to_h1 like the arrays above.
+    mitigation_credit = sweep_credit.build_mitigation_leg_credit(
+        frames["H1"],
+        by_timeframe["H1"]["levels"],
+        by_timeframe["H1"]["lrlq"],
+        time_levels,
+        swing_prefix=SWING_PREFIX["H1"],
+    )
+
+    return liq_state.build_liquidity_universe(
+        series, swept, closes, swing_ranges, mitigation_credit=mitigation_credit
+    )
 
 
 def build_instrument_pipeline(instrument):

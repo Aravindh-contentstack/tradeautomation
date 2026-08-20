@@ -43,6 +43,9 @@ def ob_table(rows, dates):
             "mitigated_index": row.get("mitigated_index"),
             "invalidated_index": row.get("invalidated_index"),
             "qualifying_touch_indices": row.get("qualifying_touch_indices", []),
+            "swept_liquidity_fvg_stale_from_index": row.get(
+                "swept_liquidity_fvg_stale_from_index"
+            ),
         })
     return pd.DataFrame(records)
 
@@ -120,6 +123,93 @@ class TestValidWindow:
         table = ob_table([{"formed_index": 0, "earliest_trigger_index": 1}], h1_ts)
         series = ob_state.to_h1_space(table, h1_ts, h1_ts, "H1")
         assert int(series.mitigated_at[0]) >= len(h1_ts)
+
+
+class TestFvgStaleFrom:
+    """fvg_stale_from is the end-boundary mirror of flip_known_from: an
+    H1-space index beyond which the swept_liquidity_fvg factor must go
+    silent. Same conversion machinery, same visibility test, opposite
+    reading of the result.
+    """
+
+    def test_h1_space_conversion_matches_flip_known_froms_own_mechanism(self):
+        """No separate assertion needed for the underlying arithmetic:
+        both fields go through the identical _to_h1_index call, so this
+        just confirms fvg_stale_from is actually wired up to it.
+        """
+        h1_ts = h1_timestamps(24 * 5)
+        d_dates = daily_timestamps(5)
+        stale_from = 2
+
+        table = ob_table([{
+            "formed_index": 0, "earliest_trigger_index": 0,
+            "swept_liquidity_fvg_stale_from_index": stale_from,
+        }], d_dates)
+        series = ob_state.to_h1_space(table, d_dates, h1_ts, "Daily")
+
+        daily = pd.DataFrame({"close_time": d_dates + pd.Timedelta(days=1),
+                              "marker": range(len(d_dates))})
+        merged = pd.merge_asof(
+            pd.DataFrame({"date": h1_ts}), daily,
+            left_on="date", right_on="close_time", direction="backward",
+        )
+        expected = int(np.flatnonzero(merged["marker"].to_numpy() == stale_from)[0])
+        assert int(series.fvg_stale_from[0]) == expected
+
+    def test_a_row_with_no_matched_gap_never_goes_stale(self):
+        """None (no gap matched swept_liquidity_fvg=False in the first
+        place) maps to the same "beyond the last valid index" sentinel
+        flip_known_from uses for "not applicable".
+        """
+        h1_ts = h1_timestamps(10)
+        table = ob_table([{"formed_index": 0, "earliest_trigger_index": 1}], h1_ts)
+        series = ob_state.to_h1_space(table, h1_ts, h1_ts, "H1")
+        assert int(series.fvg_stale_from[0]) == len(h1_ts)
+
+    def test_slicing_clips_a_boundary_already_passed_to_minus_one(self):
+        h1_ts = h1_timestamps(40)
+        table = ob_table([{
+            "formed_index": 0, "earliest_trigger_index": 1,
+            "swept_liquidity_fvg_stale_from_index": 5,
+        }], h1_ts)
+        series = ob_state.to_h1_space(table, h1_ts, h1_ts, "H1")
+        universe = ob_state.build_ob_universe(
+            {"H1": series},
+            np.full(40, 30.0), np.full(40, 25.0), np.full(40, 27.0),
+        )
+        window = ob_state.slice_universe(universe, 10, 40)
+        assert int(window.series["H1"].fvg_stale_from[0]) == -1
+
+    def test_slicing_clips_a_boundary_beyond_the_window_to_its_length(self):
+        h1_ts = h1_timestamps(40)
+        table = ob_table([{
+            "formed_index": 0, "earliest_trigger_index": 1,
+            "swept_liquidity_fvg_stale_from_index": 35,
+        }], h1_ts)
+        series = ob_state.to_h1_space(table, h1_ts, h1_ts, "H1")
+        universe = ob_state.build_ob_universe(
+            {"H1": series},
+            np.full(40, 30.0), np.full(40, 25.0), np.full(40, 27.0),
+        )
+        window = ob_state.slice_universe(universe, 0, 20)
+        assert int(window.series["H1"].fvg_stale_from[0]) == 20
+
+    def test_slicing_preserves_an_in_window_boundary_exactly(self):
+        h1_ts = h1_timestamps(40)
+        table = ob_table([{
+            "formed_index": 0, "earliest_trigger_index": 1,
+            "swept_liquidity_fvg_stale_from_index": 25,
+        }], h1_ts)
+        series = ob_state.to_h1_space(table, h1_ts, h1_ts, "H1")
+        universe = ob_state.build_ob_universe(
+            {"H1": series},
+            np.full(40, 30.0), np.full(40, 25.0), np.full(40, 27.0),
+        )
+        window = ob_state.slice_universe(universe, 10, 40)
+        # On H1 the duration is one hour, so to_h1_index maps local row 25
+        # to full-space index 26 (the first bar at or after that row's
+        # close); windowed from 10, that lands at 16.
+        assert int(window.series["H1"].fvg_stale_from[0]) == 16
 
 
 class TestTriggers:

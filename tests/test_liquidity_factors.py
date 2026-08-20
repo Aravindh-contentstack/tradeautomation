@@ -14,12 +14,16 @@ from backtest.entry_ob import TARGET_SEARCH_R, WEEKLY_TARGET_SEARCH_R
 from backtest.factors import (
     ALL_FACTORS,
     LIQUIDITY_TARGET_FACTORS,
+    MITIGATION_LEG_CHILDREN,
+    MITIGATION_LEG_FACTORS,
     SWEPT_GATE_TIMEFRAMES,
     SWEPT_LIQUIDITY_FACTORS_BY_TF,
     SWEPT_LIQUIDITY_GATE_FACTORS,
     evaluate_liquidity_target_factors,
+    evaluate_mitigation_leg_swept_factors,
     evaluate_swept_liquidity_factors,
 )
+from backtest.target_log import TARGET_LOG_BITS
 from smc.liquidity.liq_state import LiquidityUniverse
 
 BARS = 5
@@ -31,12 +35,15 @@ MAX_DISTANCE = TARGET_SEARCH_R * R
 WEEK_MAX_DISTANCE = WEEKLY_TARGET_SEARCH_R * R
 
 
-def universe(swept=(), targets_above=(), targets_below=()):
+def universe(swept=(), targets_above=(), targets_below=(), credit=None):
     """A LiquidityUniverse with only the arrays the gates read.
 
     swept: iterable of (timeframe, kind, side) flagged on bar BAR.
     targets_above/below: iterable of (timeframe, kind, price) present on
         every bar.
+    credit: iterable of (kind, side, price) alive on every bar, for the
+        mitigation-leg gate. None leaves the field unset, which is how a
+        universe built before this gate existed behaves.
     """
     swept_last_candle = {}
     for key in swept:
@@ -51,12 +58,19 @@ def universe(swept=(), targets_above=(), targets_below=()):
     for timeframe, kind, price in targets_below:
         below[(timeframe, kind)] = np.full(BARS, price, dtype=float)
 
+    mitigation_credit = None
+    if credit is not None:
+        mitigation_credit = {}
+        for kind, side, price in credit:
+            mitigation_credit[(kind, side)] = np.full(BARS, price, dtype=float)
+
     return LiquidityUniverse(
         n=BARS,
         series={},
         swept_last_candle=swept_last_candle,
         target_above=above,
         target_below=below,
+        mitigation_credit=mitigation_credit,
     )
 
 
@@ -253,11 +267,120 @@ class TestTargetGateTimeframes:
                            for f in LIQUIDITY_TARGET_FACTORS)
 
 
+OB_TOP = 100.2
+OB_BOTTOM = 100.0
+
+
+def mitigation_leg(liq, direction, ob_top=OB_TOP, ob_bottom=OB_BOTTOM):
+    return evaluate_mitigation_leg_swept_factors(
+        liq, BAR, direction, ob_top, ob_bottom
+    )
+
+
+class TestMitigationLegGeometry:
+    """Eligible liquidity sits ABOVE a bullish OB and BELOW a bearish one."""
+
+    def test_a_long_scores_a_low_side_level_above_the_zone(self):
+        """The previous day's low resting above a demand zone: price wicks
+        under it, running the sell stops, then falls into the zone where that
+        liquidity fills the buy orders.
+        """
+        liq = universe(credit=[("previous_day", "low", 100.3)])
+        answers = mitigation_leg(liq, "bullish")
+
+        assert answers == {"h1_mitigation_leg_swept_liquidity_previous_day": True}
+
+    def test_a_long_ignores_a_level_below_the_zone(self):
+        """Price would have to destroy the order block to reach it, so there
+        would be no setup left to score.
+        """
+        liq = universe(credit=[("previous_day", "low", 99.5)])
+
+        assert mitigation_leg(liq, "bullish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+    def test_a_long_ignores_a_level_inside_the_zone(self):
+        """Taking it IS the mitigation, not a stop run preceding it."""
+        liq = universe(credit=[("previous_day", "low", 100.1)])
+
+        assert mitigation_leg(liq, "bullish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+    def test_a_level_exactly_at_the_zone_top_is_excluded(self):
+        liq = universe(credit=[("previous_day", "low", OB_TOP)])
+
+        assert mitigation_leg(liq, "bullish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+    def test_a_short_scores_a_high_side_level_below_the_zone(self):
+        liq = universe(credit=[("previous_day", "high", 99.7)])
+        answers = mitigation_leg(liq, "bearish")
+
+        assert answers == {"h1_mitigation_leg_swept_liquidity_previous_day": True}
+
+    def test_a_short_ignores_a_level_above_the_zone(self):
+        liq = universe(credit=[("previous_day", "high", 100.5)])
+
+        assert mitigation_leg(liq, "bearish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+    def test_the_wanted_side_is_the_only_one_read(self):
+        """A long wants the sell stops under the market run. A high-side
+        sweep before a long is the opposite story.
+        """
+        liq = universe(credit=[("previous_day", "high", 100.3)])
+
+        assert mitigation_leg(liq, "bullish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+
+class TestMitigationLegRollUp:
+    def test_two_surviving_kinds_give_two_yeses_and_no_parent(self):
+        liq = universe(credit=[
+            ("old_point", "low", 100.3),
+            ("previous_day", "low", 100.4),
+        ])
+        answers = mitigation_leg(liq, "bullish")
+
+        assert answers == {
+            "h1_mitigation_leg_swept_liquidity_old_points": True,
+            "h1_mitigation_leg_swept_liquidity_previous_day": True,
+        }
+
+    def test_nothing_surviving_gives_the_parent_alone(self):
+        liq = universe(credit=[])
+
+        assert mitigation_leg(liq, "bullish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+    def test_an_expired_credit_reads_as_nan_and_scores_nothing(self):
+        liq = universe(credit=[("previous_day", "low", float("nan"))])
+
+        assert mitigation_leg(liq, "bullish") == {
+            "h1_mitigation_leg_swept_liquidity": False
+        }
+
+    def test_a_universe_without_the_field_omits_the_gate(self):
+        """Not a no. A universe built before this gate existed must score
+        exactly as it did before.
+        """
+        assert mitigation_leg(universe(), "bullish") == {}
+
+
 class TestNoUniverse:
     @pytest.mark.parametrize("evaluate", [
         lambda: evaluate_swept_liquidity_factors(None, BAR, "bullish"),
         lambda: evaluate_liquidity_target_factors(
             None, BAR, "bullish", CLOSE, CLOSE, MAX_DISTANCE, WEEK_MAX_DISTANCE
+        ),
+        lambda: evaluate_mitigation_leg_swept_factors(
+            None, BAR, "bullish", OB_TOP, OB_BOTTOM
         ),
     ])
     def test_a_missing_universe_omits_the_gate_entirely(self, evaluate):
@@ -272,6 +395,9 @@ class TestFactorRegistry:
         assert set(SWEPT_LIQUIDITY_GATE_FACTORS) <= set(ALL_FACTORS)
         assert set(LIQUIDITY_TARGET_FACTORS) <= set(ALL_FACTORS)
 
+    def test_the_mitigation_leg_gate_is_in_all_factors(self):
+        assert set(MITIGATION_LEG_FACTORS) <= set(ALL_FACTORS)
+
     def test_factor_names_are_unique(self):
         assert len(ALL_FACTORS) == len(set(ALL_FACTORS))
 
@@ -282,3 +408,54 @@ class TestFactorRegistry:
         """
         assert "daily_swept_liquidity_swing" in ALL_FACTORS
         assert "daily_mitigation_ob_swept_liquidity_swing" in ALL_FACTORS
+
+    def test_the_mitigation_leg_gate_does_not_collide_with_the_ob_gate(self):
+        """The formation leg and the approach leg are different legs, weeks
+        apart, and both get their own name.
+        """
+        assert "h1_mitigation_leg_swept_liquidity_old_points" in ALL_FACTORS
+        assert "h1_mitigation_ob_swept_liquidity_old_points" in ALL_FACTORS
+
+    def test_the_mitigation_leg_gate_is_h1_only(self):
+        for factor in MITIGATION_LEG_FACTORS:
+            assert factor.startswith("h1_")
+        for prefix in ("daily_", "h4_"):
+            assert not any(
+                f.startswith("%smitigation_leg" % prefix) for f in ALL_FACTORS
+            )
+
+    @pytest.mark.parametrize("child", ["swing", "internal", "fractal", "fvg"])
+    def test_structural_and_fvg_children_do_not_exist_on_this_gate(self, child):
+        """FVG especially: an order block's own displacement leg leaves an
+        imbalance in front of the zone, so every mitigation would sweep it.
+        A name that can never be legitimately emitted is not created.
+        """
+        assert child not in MITIGATION_LEG_CHILDREN
+        assert "h1_mitigation_leg_swept_liquidity_%s" % child not in ALL_FACTORS
+
+
+class TestTargetLogBitsUnchanged:
+    """The new gate must not touch the stored bitmask positions."""
+
+    def test_no_mitigation_leg_entry_in_the_bit_table(self):
+        assert not any("mitigation_leg" in gate for gate, _ in TARGET_LOG_BITS)
+
+    def test_the_original_bit_positions_are_intact(self):
+        """target_log.py derives bit positions from factor list ORDER, so an
+        insertion into the wrong list silently reinterprets every stored
+        parquet. This pins the first twelve.
+        """
+        assert TARGET_LOG_BITS[:12] == [
+            ("ob_target", "caused_displacement"),
+            ("ob_target", "caused_imbalance"),
+            ("ob_target", "has_inducement"),
+            ("ob_target", "flip_zone"),
+            ("ob_target", "swept_liquidity_swing"),
+            ("ob_target", "swept_liquidity_internal"),
+            ("ob_target", "swept_liquidity_fractal"),
+            ("ob_target", "swept_liquidity_fvg"),
+            ("ob_target", "swept_liquidity_previous_candle"),
+            ("ob_target", "swept_liquidity"),
+            ("ob_target", "within_daily_ob"),
+            ("ob_target", "within_h4_ob"),
+        ]
