@@ -135,3 +135,46 @@ the VPS - it keeps going even when your Mac is off).
 - All 10 pairs share one account balance and one `MAX_DAILY_LOSS_PCT`
   reference point. The breaker is per-pair, but the account's overall
   risk still scales with however many pairs signal on the same day.
+
+
+## M15 entry models (Phase 4)
+
+The bot no longer sends market orders. Entries come from the M15 entry
+models (LC-1, LC-2A, LC-2B, CE), which means:
+
+- **The clock is M15, not H1.** `run_once` wakes on each new closed M15
+  candle. Setups form and orders re-host on M15 boundaries, so waking only
+  on the hour would place orders up to 45 minutes stale.
+- **Orders REST at the broker.** A stop for the LC models, a limit for CE.
+  The backtest's fill is the first M15 candle whose wick reaches the order
+  price, and only a real pending order reproduces that. Market-ordering
+  once the fill candle closed would enter at that candle's close, which
+  can be most of the way to the stop.
+- **The plan is recomputed every candle.** `live/pending_plan.py` compares
+  what should be resting against what is, then places, keeps or cancels.
+  Nothing is remembered and diffed forward, so a failed send or a missed
+  fill self-corrects on the next poll instead of drifting permanently.
+- **A price change is a replace, not a modify.** An LC order re-hosting
+  moves its price and its stop together, and a partial modify would leave a
+  live order with the wrong stop attached.
+
+### What is NOT verified
+
+`live/` imports MetaTrader5, which is Windows-only, so none of it runs on
+the development machine. The decision logic was extracted into
+`live/pending_plan.py` precisely so it could be tested without MT5, and it
+is (`tests/test_pending_plan.py`). Everything else in this directory,
+including every `order_send` call, has only ever been read, not executed.
+
+Run with `DRY_RUN=true` first. It exercises the whole path including the
+plan, and alerts what it would have rested, without sending anything.
+
+### Two open findings from the backtest
+
+Both are in `roadmap/m15-entry-plan.md` and neither is resolved:
+
+- **LC-1 loses money** on the EUR_USD 2020-2025 walk-forward: -0.451 R per
+  trade over 50 candidates, against +0.29 for LC-2A and +0.27 for CE. It is
+  still enabled.
+- **Longs underperform shorts** across every model. The asymmetry predates
+  the entry layer, but the entry layer amplifies it.

@@ -28,12 +28,14 @@ history is safe because ob_state stores per-OB index thresholds rather
 than lifetime flags, so windowing cannot reveal a zone early.
 """
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from backtest.context import build_market_context
+from backtest.m15_pipeline import build_m15_bundle
 from smc.liquidity import liq_state, sweep_credit, sweeps
 from smc.liquidity.fair_value_gaps import compute_fair_value_gaps
 from smc.liquidity.levels import compute_liquidity_levels
@@ -125,6 +127,11 @@ class PipelineBundle:
     df: object
     obs: object
     liq: object = None
+    # The M15 substrate the entry models read. FULL M15 history, NOT sliced
+    # per year and NOT rebased with the frame: see backtest/m15_pipeline.py
+    # on why its index space is separate from everything else here, and why
+    # crossing between them goes by timestamp only.
+    m15: object = None
 
 
 def _load_raw(instrument, granularity):
@@ -132,7 +139,20 @@ def _load_raw(instrument, granularity):
     return pd.read_parquet(path)
 
 
-def build_live_context(daily_df, h4_df, h1_df, pip_size, tail=LIVE_CONTEXT_BARS):
+def _load_raw_optional(instrument, granularity):
+    """_load_raw, but a missing file is None rather than an error.
+
+    Only M15 uses this. Nine of the ten instruments have it and NAS100 does
+    not, so absence is a supported state and not a broken install.
+    """
+    path = "data/raw/%s_%s.parquet" % (instrument, granularity)
+    if not os.path.exists(path):
+        return None
+    return pd.read_parquet(path)
+
+
+def build_live_context(daily_df, h4_df, h1_df, pip_size, tail=LIVE_CONTEXT_BARS,
+                       m15_df=None):
     """A MarketContext over the last `tail` H1 bars, for the live bot.
 
     The live loop only cares about the newest closed candle, but it cannot
@@ -145,7 +165,7 @@ def build_live_context(daily_df, h4_df, h1_df, pip_size, tail=LIVE_CONTEXT_BARS)
     session defers its entry to the next candle, so the trigger bar and
     the entry bar are different rows and both must be inside the window.
     """
-    bundle = build_pipeline_bundle(daily_df, h4_df, h1_df)
+    bundle = build_pipeline_bundle(daily_df, h4_df, h1_df, m15_df)
     total = len(bundle.df)
     start = max(total - tail, 0)
 
@@ -155,6 +175,11 @@ def build_live_context(daily_df, h4_df, h1_df, pip_size, tail=LIVE_CONTEXT_BARS)
         pip_size,
         obs=ob_state.slice_universe(bundle.obs, start, total),
         liq=liq_state.slice_universe(bundle.liq, start, total),
+        # Passed through UNSLICED, unlike obs and liq. The bundle is indexed
+        # on its own full M15 history and the entry models cross into it by
+        # timestamp, so slicing it here would be the one rebasing this
+        # design exists to avoid.
+        m15_bundle=bundle.m15,
     )
 
 
@@ -317,7 +342,10 @@ def build_instrument_bundle(instrument):
     daily_df = _load_raw(instrument, "D")
     h4_df = _load_raw(instrument, "H4")
     h1_df = _load_raw(instrument, "H1")
-    return build_pipeline_bundle(daily_df, h4_df, h1_df)
+    # M15 is optional by design. NAS100 has none, and the whole engine runs
+    # without it (no entry candidates, rather than an error).
+    m15_df = _load_raw_optional(instrument, "M15")
+    return build_pipeline_bundle(daily_df, h4_df, h1_df, m15_df)
 
 
 def build_pipeline_from_frames(daily_df, h4_df, h1_df):
@@ -325,7 +353,7 @@ def build_pipeline_from_frames(daily_df, h4_df, h1_df):
     return build_pipeline_bundle(daily_df, h4_df, h1_df).df
 
 
-def build_pipeline_bundle(daily_df, h4_df, h1_df):
+def build_pipeline_bundle(daily_df, h4_df, h1_df, m15_df=None):
     """Same merge/no-lookahead logic as build_instrument_pipeline, but
     takes already-loaded Daily/H4/H1 DataFrames (date, open, high, low,
     close, ascending, only fully-closed candles) instead of reading the
@@ -439,4 +467,9 @@ def build_pipeline_bundle(daily_df, h4_df, h1_df):
         liquidity, time_levels, frames, merged, h1_ts, merged["close"].to_numpy()
     )
 
-    return PipelineBundle(df=merged, obs=universe, liq=liquidity_universe)
+    return PipelineBundle(
+        df=merged,
+        obs=universe,
+        liq=liquidity_universe,
+        m15=build_m15_bundle(m15_df),
+    )

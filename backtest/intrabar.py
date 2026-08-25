@@ -8,8 +8,30 @@ answer used to be "credit the whole favourable move anyway", which
 inflated max_r_reached with a move that may never have been available
 (defect 2 in the plan). The honest answer is to look inside the bar.
 
-M15 is used for exactly this and nothing else. Entry stays on H1 --
-there is no M15 structure detection, and no M15 factor (user-confirmed).
+This module used to carry the line "M15 is used for exactly this and
+nothing else. Entry stays on H1 -- there is no M15 structure detection,
+and no M15 factor (user-confirmed)." That decision has been REVERSED.
+The M15 entry models (LC-1, LC-2A, LC-2B, CE) now detect structure and
+liquidity on M15 and contribute their own factors, so M15 has two
+consumers rather than one.
+
+What did not change is the direction of the mapping. The base timeline
+is still H1: order blocks, liquidity levels and every factor array stay
+indexed on H1 bars, and the entry layer is a bounded sub-scan that hands
+back a price and a fill bar. Anything that needs the H1 universe rebased
+onto M15 is a different and much larger change, and is not what
+happened.
+
+This class is NOT the entry layer's seam, and must not become it. Its
+indices are YEAR-SCOPED: runner.run_year hands build_market_context an
+m15_df already windowed to the walk period, so subbars() addresses that
+window and nothing else. The entry models need full history instead, or
+liquidity formed in December would be invisible to January for the same
+reason build_pipeline_bundle refuses to build order blocks per year. So
+backtest/m15_pipeline.py builds its own full-history bundle and maps
+between the two spaces by TIMESTAMP, never by reusing an index from
+here. Mixing the two index spaces is silent and would misaddress every
+level.
 
 Why searchsorted and not a mask
 -------------------------------

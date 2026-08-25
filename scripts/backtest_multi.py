@@ -117,6 +117,8 @@ def run_instrument(instrument, years=YEARS):
     m15_df = load_m15(instrument)
     if m15_df is None:
         print("  (no M15 data: intrabar ties resolve pessimistically)")
+    if bundle.m15 is None:
+        print("  (no M15 bundle: the entry models produce no candidates)")
 
     available_years = sorted(df["date"].dt.year.unique())
     years = [y for y in years if y in available_years]
@@ -135,6 +137,11 @@ def run_instrument(instrument, years=YEARS):
             frozen_weights=frozen_weights_for(instrument, year),
             settings=applied,
             m15_df=m15_df,
+            # Built once over full history by build_instrument_bundle and
+            # reused by every year, which is both cheaper and the only
+            # correct thing: see backtest/m15_pipeline.py on why it is not
+            # cut per year.
+            m15_bundle=bundle.m15,
             obs=bundle.obs,
             liq=bundle.liq,
         )

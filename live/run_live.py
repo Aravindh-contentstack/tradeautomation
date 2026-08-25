@@ -55,6 +55,7 @@ from backtest.weights import load_weights
 
 from live import alerts, mt5_connector as connector, journal_live, risk, safety
 from live.pairs import PAIRS, magic_for
+from live.pending_plan import plan_pending
 
 if len(sys.argv) != 2 or sys.argv[1] not in PAIRS:
     sys.exit("Usage: python live/run_live.py <INSTRUMENT>, one of: %s" % ", ".join(PAIRS))
@@ -67,6 +68,11 @@ MAGIC = magic_for(INSTRUMENT)  # distinct per pair, so 10 processes on one accou
 DAILY_HISTORY_COUNT = 1000
 H4_HISTORY_COUNT = 1500
 H1_HISTORY_COUNT = 3000
+# The entry models need enough M15 to seed ATR(14), form n=5 internal
+# structure, and hold LC-2A's 30-candle approach lookback, all with room to
+# spare. 3000 bars is about a month, which is far more than any of that and
+# still a cheap fetch at a 15-second poll.
+M15_HISTORY_COUNT = 3000
 
 POLL_SECONDS = 15
 DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
@@ -222,34 +228,74 @@ def run_once(state, settings, weights):
     daily_df = connector.fetch_closed_candles(MT5_SYMBOL, "D", DAILY_HISTORY_COUNT)
     h4_df = connector.fetch_closed_candles(MT5_SYMBOL, "H4", H4_HISTORY_COUNT)
     h1_df = connector.fetch_closed_candles(MT5_SYMBOL, "H1", H1_HISTORY_COUNT)
+    m15_df = connector.fetch_closed_candles(MT5_SYMBOL, "M15", M15_HISTORY_COUNT)
 
     # A full context, not a tail slice of the frame. Order-block positions
     # address the whole history, so slicing the frame afterwards would
     # mis-address every zone; build_live_context cuts the frame and rebases
-    # the OB universe together.
-    ctx = build_live_context(daily_df, h4_df, h1_df, PIP_SIZE)
-    latest_candle_time = ctx.df["date"].iloc[-1]
+    # the OB universe together. The M15 bundle is passed through UNSLICED,
+    # for the reason in backtest/m15_pipeline.py.
+    ctx = build_live_context(daily_df, h4_df, h1_df, PIP_SIZE, m15_df=m15_df)
+    if ctx.m15_bundle is None:
+        return state
+
+    # The clock is M15 now, not H1. Setups form and orders re-host on M15
+    # boundaries, so waking only on a new H1 candle would miss three
+    # quarters of every decision and place orders up to 45 minutes stale.
+    as_of = len(ctx.m15_bundle.ts) - 1
+    latest_candle_time = pd.Timestamp(ctx.m15_bundle.ts[as_of], tz="UTC")
 
     if not safety.is_new_candle(state, latest_candle_time):
         return state
     safety.mark_candle_processed(state, latest_candle_time)
 
-    signals = find_signals(ctx, weights, PIP_SIZE)
-    new_signals = [s for s in signals if s["entry_time"] == latest_candle_time]
-    if not new_signals:
-        return state
+    signals = find_signals(
+        ctx, weights, PIP_SIZE,
+        htf_threshold=settings.get("htf_threshold"),
+        pending_as_of=as_of,
+    )
+    state = reconcile_pending_orders(state, signals, settings, balance)
+    return state
 
-    signal = new_signals[0]
 
-    if not is_taken(signal, settings, PIP_SIZE):
-        alerts.send(
-            "Signal skipped (%s): probability %.1f%%, SL %.1f pips did not clear the "
-            "current settings (threshold=%s, max_sl_size_pips=%s)"
-            % (INSTRUMENT, signal["probability"], signal["r_distance"] / PIP_SIZE,
-               settings.get("threshold"), settings.get("max_sl_size_pips"))
-        )
-        return state
+def reconcile_pending_orders(state, signals, settings, balance):
+    """Makes what is RESTING at the broker match what should be resting.
 
+    The decision is live/pending_plan.py's, deliberately: MetaTrader5 is
+    Windows-only, so anything importing it cannot be tested where this is
+    written, and order placement is the last logic that should go untested.
+    This function only EXECUTES the plan.
+    """
+    taken = [s for s in signals if is_taken(s, settings, PIP_SIZE)]
+    keep, cancel, place = plan_pending(
+        taken, state.get("pending") or {}, PIP_SIZE
+    )
+
+    for record in cancel:
+        if DRY_RUN:
+            continue
+        if not connector.pending_order_exists(record["ticket"]):
+            continue
+        if not connector.cancel_pending_order(record["ticket"]):
+            # Kept so the next poll tries again. Forgetting an order that
+            # is still live at the broker is the one outcome here that can
+            # leave an unmanaged position.
+            keep[str(record.get("ob_row", record["ticket"]))] = record
+            alerts.send("Could not cancel pending order %s (%s)"
+                        % (record["ticket"], INSTRUMENT))
+
+    for ob_row, signal in place.items():
+        placed = place_pending(signal, settings, balance)
+        if placed is not None:
+            placed["ob_row"] = ob_row
+            keep[str(ob_row)] = placed
+
+    state["pending"] = keep
+    return state
+
+
+def place_pending(signal, settings, balance):
+    """Rests one order. Returns the record to remember, or None."""
     spec = connector.symbol_trade_spec(MT5_SYMBOL)
     lots = risk.position_size(balance, signal["r_distance"], spec)
     if lots is None:
@@ -257,32 +303,48 @@ def run_once(state, settings, weights):
             "Signal skipped (%s): broker's minimum lot would risk more than %.0fx the "
             "intended 0.1%% given current balance" % (INSTRUMENT, risk.MAX_RISK_MULTIPLE_ON_MIN_LOT)
         )
-        return state
+        return None
 
-    tp = tp_price_for(signal["entry_price"], signal["direction"], signal["r_distance"], settings["tp_multiple"])
+    tp = tp_price_for(
+        signal["order_price"], signal["direction"], signal["r_distance"],
+        settings["tp_multiple"],
+    )
 
     if DRY_RUN:
         alerts.send(
-            "[DRY RUN] Would place %s %s %.2f lots @ %.5f, SL %.5f, TP %.5f, probability %.1f%%"
-            % (signal["direction"], INSTRUMENT, lots, signal["entry_price"], signal["sl"], tp, signal["probability"])
+            "[DRY RUN] Would rest %s %s %s %.2f lots @ %.5f, SL %.5f, TP %.5f, "
+            "total %.1f%% (HTF %.1f%%)"
+            % (signal["entry_model"], signal["order_kind"], signal["direction"],
+               lots, signal["order_price"], signal["sl"], tp,
+               signal["total_probability"], signal["htf_probability"])
         )
-        return state
+        return None
 
-    result = connector.send_market_order(
-        MT5_SYMBOL, signal["direction"], lots, signal["sl"], tp, magic=MAGIC, comment="algo-h1-ob"
+    result = connector.send_pending_order(
+        MT5_SYMBOL, signal["order_kind"], signal["direction"], lots,
+        signal["order_price"], signal["sl"], tp,
+        magic=MAGIC, comment="algo-m15-%s" % signal["entry_model"],
     )
     if not result["success"]:
         alerts.send(
-            "ORDER FAILED (%s): retcode=%s comment=%s" % (INSTRUMENT, result["retcode"], result["comment"])
+            "PENDING ORDER FAILED (%s): retcode=%s comment=%s"
+            % (INSTRUMENT, result["retcode"], result["comment"])
         )
-        return state
+        return None
 
     journal_live.append_open_trade(INSTRUMENT, signal, tp, result["ticket"], lots)
     alerts.send(
-        "Order placed: %s %s %.2f lots @ %.5f, SL %.5f, TP %.5f, probability %.1f%%"
-        % (signal["direction"], INSTRUMENT, lots, signal["entry_price"], signal["sl"], tp, signal["probability"])
+        "Order resting: %s %s %s %.2f lots @ %.5f, SL %.5f, TP %.5f, total %.1f%%"
+        % (signal["entry_model"], signal["order_kind"], signal["direction"],
+           lots, signal["order_price"], signal["sl"], tp,
+           signal["total_probability"])
     )
-    return state
+    return {
+        "ticket": result["ticket"],
+        "price": signal["order_price"],
+        "sl": signal["sl"],
+        "model": signal["entry_model"],
+    }
 
 
 def main():

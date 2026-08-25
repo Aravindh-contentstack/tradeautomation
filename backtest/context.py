@@ -54,9 +54,16 @@ class MarketContext:
     m15: object                 # M15Index, or None when M15 is unavailable
     obs: object = None          # ObUniverse rebased on this window, or None
     liq: object = None          # LiquidityUniverse on the same window, or None
+    # M15Bundle over FULL M15 history, for the entry models. Deliberately
+    # NOT the same index space as `m15` above, which is an M15Index over the
+    # year-windowed frame. Nothing may pass an index from one to the other:
+    # see backtest/m15_pipeline.py's docstring. None when M15 is missing,
+    # which yields no entry candidates rather than an error.
+    m15_bundle: object = None
 
 
-def build_market_context(year_df, pip_size, m15_df=None, obs=None, liq=None):
+def build_market_context(year_df, pip_size, m15_df=None, obs=None, liq=None,
+                         m15_bundle=None):
     """Builds the MarketContext for one instrument-year.
 
     year_df must carry date/open/high/low/close, be sorted ascending, and
@@ -78,6 +85,11 @@ def build_market_context(year_df, pip_size, m15_df=None, obs=None, liq=None):
     omitted from scoring entirely, which is the same dynamic exclusion a
     timeframe with nothing to say already gets, so an older caller that
     passes no liquidity scores exactly as it did before.
+
+    m15_bundle is an M15Bundle over FULL history, NOT windowed. It is the
+    one thing here that is not rebased onto this frame, because its index
+    space is its own and callers reach it by timestamp. Passing a windowed
+    bundle would silently misaddress every level.
     """
     year_df = year_df.reset_index(drop=True)
 
@@ -114,6 +126,7 @@ def build_market_context(year_df, pip_size, m15_df=None, obs=None, liq=None):
         m15=build_m15_index(dates, m15_df),
         obs=obs,
         liq=liq,
+        m15_bundle=m15_bundle,
     )
 
 

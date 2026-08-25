@@ -30,7 +30,21 @@ import os
 
 # None means "no filter", not "zero". 2020 bootstraps here with nothing to carry
 # forward, so it takes every candidate at the spec's 2.5R.
+#
+# TWO thresholds now, because the M15 entry layer splits the decision the way
+# the user actually makes it:
+#
+#   htf_threshold    gates whether the M15 scan runs at all. FIXED permissive,
+#                    never searched -- see analysis.py for why.
+#   total_threshold  gates whether the order is placed, scored over HTF plus
+#                    entry factors together. This is the one that is searched.
+#
+# `threshold` is kept for the legacy files on disk and for the pre-M15 baseline
+# path. load_settings maps a file carrying only `threshold` onto
+# total_threshold, so five years of stored settings keep working.
 DEFAULT_SETTINGS = {
+    "htf_threshold": None,
+    "total_threshold": None,
     "threshold": None,
     "tp_multiple": 2.5,
     "max_sl_size_pips": None,
@@ -79,6 +93,14 @@ def load_settings(path):
     for key in DEFAULT_SETTINGS:
         if source.get(key) is not None:
             merged[key] = source[key]
+
+    # Shape 5: a file written before the entry layer existed carries only
+    # `threshold`. It was scored over HTF factors alone, but it was the gate on
+    # placing the order, so total_threshold is where it belongs. Leaving
+    # htf_threshold at None means no pre-gate, which is the permissive end and
+    # therefore the safe reading of a file that never had one.
+    if merged["total_threshold"] is None and merged["threshold"] is not None:
+        merged["total_threshold"] = merged["threshold"]
     return merged
 
 
@@ -121,9 +143,17 @@ def is_taken(signal, settings, pip_size):
         if not signal["r_distance"] <= max_sl_size_price:
             return False
 
-    threshold = settings.get("threshold")
+    # total_probability is HTF plus the firing entry model's factors. A signal
+    # from the pre-M15 path has no entry factors, so find_signals sets it equal
+    # to `probability` and this comparison is unchanged for that case.
+    threshold = settings.get("total_threshold")
+    if threshold is None:
+        threshold = settings.get("threshold")
     if threshold is not None:
-        if not signal["probability"] >= threshold:
+        score = signal.get("total_probability")
+        if score is None:
+            score = signal["probability"]
+        if not score >= threshold:
             return False
 
     return True
@@ -135,7 +165,28 @@ def apply_settings(signals, settings, pip_size):
     Deliberately tags rather than filters. The caller still simulates and journals
     every candidate; `taken` only controls whose P&L counts. Filtering here is the
     ratchet trap described in the module docstring.
+
+    Also enforces one taken trade per order block. Signals must arrive in
+    chronological order for that to mean "the first one", which find_signals
+    guarantees by walking bars forward.
     """
+    seen_obs = set()
     for signal in signals:
-        signal["taken"] = is_taken(signal, settings, pip_size)
+        taken = is_taken(signal, settings, pip_size)
+        # ONE TRADE PER ORDER BLOCK, the user's rule. Enforced here rather
+        # than in find_signals because "taken" is what the rule counts, and
+        # only this function knows it. A candidate that never passed the
+        # threshold costs the zone nothing.
+        #
+        # First-come, not best-of. Picking the highest-scoring candidate on
+        # a zone would need the zone's whole life in hand before deciding,
+        # which the live bot never has.
+        if taken:
+            ob_row = signal.get("ob_row")
+            if ob_row is not None:
+                if ob_row in seen_obs:
+                    taken = False
+                else:
+                    seen_obs.add(ob_row)
+        signal["taken"] = taken
     return signals

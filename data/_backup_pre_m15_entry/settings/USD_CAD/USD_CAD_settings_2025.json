@@ -1,0 +1,5 @@
+{
+  "threshold": 55,
+  "tp_multiple": 2.5,
+  "max_sl_size_pips": 16.3
+}

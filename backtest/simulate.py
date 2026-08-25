@@ -51,13 +51,17 @@ import numpy as np
 import pandas as pd
 
 from backtest.context import bar_timestamp
+from backtest.entry_factors import (
+    evaluate_entry_factors,
+    evaluate_entry_target_factors,
+)
+from backtest.entry_models import Zone, pending_order_for, scan_for_entry
 from backtest.entry_ob import (
     TARGET_SEARCH_R,
     WEEKLY_TARGET_SEARCH_R,
-    build_setup,
     iter_mitigation_candidates,
-    resolve_entry_bar,
 )
+from backtest.m15_pipeline import h1_bar_containing, m15_index_at_or_after
 from backtest.factors import (
     ALL_FACTORS,
     compute_probability,
@@ -93,132 +97,218 @@ FIXED_TP_MULTIPLE = 2.5
 MAX_R_CEILING = 10.0
 
 
-def find_signals(ctx, weights, pip_size):
-    """Returns a list of signal dicts: every qualifying touch of a valid
-    H1 order block that also passes the killzone gate, scored with the
-    CURRENT weights table. No probability threshold and no max-SL filter
-    is applied here: those are decided later, by the prior year's settings
-    (backtest/settings.py).
+def zone_for(ctx, ob_row):
+    """The H1 order block as backtest/entry_models.py wants it.
 
-    That separation is load-bearing, not incidental. If this function
-    pre-filtered, each year's journal would contain only trades that
-    passed the PREVIOUS year's filters, so the settings search would see
-    an already-filtered pool and could only ever recommend a stricter
-    one. Thresholds would ratchet upward every year until the pool
-    starved. Every candidate is returned; `taken` records whether the
-    settings admitted it.
+    The whole adapter between ObSeries and the entry layer, deliberately
+    two dozen lines in one place: entry_models never imports ob_state, and
+    its tests never have to build an ObUniverse.
+    """
+    series = ctx.obs.series["H1"]
+    tier = series.primary_tier[ob_row] if series.primary_tier is not None else None
+    return Zone(
+        top=float(series.top[ob_row]),
+        bottom=float(series.bottom[ob_row]),
+        bullish=bool(series.sign[ob_row] > 0),
+        primary_tier=tier,
+        valid_through=int(series.valid_through[ob_row]),
+        touch_at=tuple(series.touch_at[ob_row]),
+        visible_from=int(series.visible_from[ob_row]),
+    )
+
+
+def _htf_factors(ctx, k, direction, ob_row):
+    """Everything scoreable at the MITIGATION bar, before an entry exists.
+
+    The two target gates are absent on purpose: both need a max distance in
+    R, and R comes from the M15 setup, which has not been found yet. So
+    htf_probability is the higher-timeframe picture alone, which is exactly
+    what the HTF gate is meant to judge.
+    """
+    factors = evaluate_mitigation_ob_factors(ctx.obs, k, direction, ob_row)
+    factors.update(
+        evaluate_swept_liquidity_factors(getattr(ctx, "liq", None), k, direction)
+    )
+    factors.update(
+        evaluate_mitigation_leg_swept_factors(
+            getattr(ctx, "liq", None),
+            k,
+            direction,
+            float(ctx.obs.series["H1"].top[ob_row]),
+            float(ctx.obs.series["H1"].bottom[ob_row]),
+        )
+    )
+    factors.update(evaluate_always_factors(ctx.df.iloc[k], direction))
+    return factors
+
+
+def find_signals(ctx, weights, pip_size, htf_threshold=None,
+                 pending_as_of=None):
+    """Every M15 entry model that fired on a qualifying H1 OB touch.
+
+    pending_as_of switches the question from historical to live. Left None
+    (the backtest) each candidate is a setup that FILLED, and the signal
+    carries the fill bar and price. Set to the last closed M15 bar (the
+    live bot) each candidate is an order that should be RESTING at that
+    bar, with `order_kind` and `expires_m15` instead of a fill, because the
+    broker has not tagged it yet and may never.
+
+    One code path rather than two on purpose: the HTF gate, all the factor
+    scoring, and the signal shape are identical, and the live bot has to
+    score a candidate exactly as the backtest would or the thresholds it
+    inherits mean nothing.
+
+    No total-probability threshold and no max-SL filter is applied here:
+    those are decided later by the prior year's settings
+    (backtest/settings.py). That separation is load-bearing. If this
+    function pre-filtered on them, each year's journal would contain only
+    trades that passed the PREVIOUS year's filters, the settings search
+    would see an already-filtered pool, and thresholds would ratchet
+    upward every year until the pool starved.
+
+    htf_threshold is the ONE exception, and it is deliberately not part of
+    that machinery. It is fixed permissive rather than searched (see
+    analysis.HTF_GATE_QUANTILE), and its job is to skip the M15 scan when
+    the higher-timeframe picture is hopeless, which is a compute saving
+    and a match to how the user trades manually. None means no gate.
+
+    Two probabilities per candidate:
+
+      htf_probability    the Daily/H4/H1 picture at the mitigation bar.
+      total_probability  that plus the two target gates and the firing
+                         entry model's factors. This is what is_taken
+                         reads and what the walk-forward searches.
 
     The trade's DIRECTION is the mitigated zone's direction, decided by
-    what price touched rather than assumed beforehand. The three H1 gates
-    that used to reject candidates outright (internal structure, internal
-    zone, fractal structure) are scored factors now, because the mitigated
-    zone can legitimately disagree with them.
+    what price touched rather than assumed beforehand.
 
-    pip_size places the stop SL_BUFFER_PIPS beyond the zone's far edge
-    rather than exactly on it.
-
-    Requires a MarketContext carrying OB state (backtest/context.py). A
-    context without it yields nothing, which is what a caller that never
-    built the universe should get.
+    Requires a MarketContext carrying OB state AND an M15 bundle. Without
+    either it yields nothing, which is what a caller that never built them
+    should get.
     """
     if getattr(ctx, "obs", None) is None:
+        return []
+    bundle = getattr(ctx, "m15_bundle", None)
+    if bundle is None:
         return []
 
     signals = []
     for k, ob_row, touch_no in iter_mitigation_candidates(ctx):
-        entry_index = resolve_entry_bar(ctx, k)
-        if entry_index is None:
+        series = ctx.obs.series["H1"]
+        direction = "bullish" if series.sign[ob_row] > 0 else "bearish"
+
+        htf_factors = _htf_factors(ctx, k, direction, ob_row)
+        htf_probability = compute_probability(htf_factors, weights)
+        if htf_threshold is not None and htf_probability < htf_threshold:
             continue
 
-        setup = build_setup(ctx, ob_row, entry_index, pip_size)
+        zone = zone_for(ctx, ob_row)
+        if pending_as_of is None:
+            setup = scan_for_entry(bundle, ctx.ts, zone, k, pip_size)
+        else:
+            setup = pending_order_for(
+                bundle, ctx.ts, zone, k, pip_size, pending_as_of
+            )
         if setup is None:
             continue
 
-        entry_time = bar_timestamp(ctx, entry_index)
-        session = session_for(entry_time)
-        if session is None:
+        # An M15 bar; the walk and the factor gates run on H1. -1 means it
+        # landed where no H1 bar exists, which is unresolvable rather than
+        # bar zero.
+        anchor_m15 = (
+            setup["fill_m15"] if pending_as_of is None else pending_as_of
+        )
+        entry_index = h1_bar_containing(ctx.ts, bundle.ts[anchor_m15])
+        if entry_index < 0:
             continue
 
-        direction = setup["direction"]
-        row = ctx.df.iloc[entry_index]
-        # Both frozen gates in one dict: what the zone was, and what price
-        # had already taken on its way in. Neither changes once the trade is
-        # open, so simulate_trade rebuilds its live score on top of this
-        # rather than re-deriving it every bar.
-        mitigation_factor_results = evaluate_mitigation_ob_factors(
-            ctx.obs, entry_index, direction, ob_row
+        # A resting order has no fill price yet, so the order price is the
+        # best available estimate of where it will enter. That is exactly
+        # what the backtest assumes too: its fill price IS the order price.
+        entry_price = (
+            setup["fill_price"] if pending_as_of is None
+            else setup["order_price"]
         )
-        mitigation_factor_results.update(
-            evaluate_swept_liquidity_factors(
-                getattr(ctx, "liq", None), entry_index, direction
-            )
-        )
-        # What the H1 approach leg took on its way in, which neither gate
-        # above can see: the OB's own swept columns froze at its trigger,
-        # possibly weeks earlier, and the standalone gate only looks at the
-        # last closed Daily or 4H candle. Scored at entry_index, so a
-        # killzone-deferred entry is judged on the bar it actually enters on.
-        mitigation_factor_results.update(
-            evaluate_mitigation_leg_swept_factors(
-                getattr(ctx, "liq", None),
-                entry_index,
-                direction,
-                float(ctx.obs.series["H1"].top[ob_row]),
-                float(ctx.obs.series["H1"].bottom[ob_row]),
-            )
+        r_distance = setup["r_distance"]
+        target_max = TARGET_SEARCH_R * r_distance
+        weekly_max = WEEKLY_TARGET_SEARCH_R * r_distance
+
+        # Frozen for the life of the trade: the HTF picture plus what the
+        # setup itself was. simulate_trade's recheck rebuilds a live score
+        # on top of this rather than re-deriving any of it every bar.
+        frozen = dict(htf_factors)
+        frozen.update(
+            evaluate_entry_factors(bundle, ctx.ts, zone, setup, k)
         )
 
-        factor_results = dict(evaluate_always_factors(row, direction))
-        factor_results.update(mitigation_factor_results)
+        factor_results = dict(frozen)
         factor_results.update(
             evaluate_ob_target_factors(
-                ctx.obs,
-                entry_index,
-                direction,
-                TARGET_SEARCH_R * setup["r_distance"],
-                float(ctx.high[entry_index]),
-                float(ctx.low[entry_index]),
+                ctx.obs, entry_index, direction, target_max,
+                float(ctx.high[entry_index]), float(ctx.low[entry_index]),
             )
         )
         factor_results.update(
             evaluate_liquidity_target_factors(
-                getattr(ctx, "liq", None),
-                entry_index,
-                direction,
-                float(ctx.high[entry_index]),
-                float(ctx.low[entry_index]),
-                TARGET_SEARCH_R * setup["r_distance"],
-                WEEKLY_TARGET_SEARCH_R * setup["r_distance"],
+                getattr(ctx, "liq", None), entry_index, direction,
+                float(ctx.high[entry_index]), float(ctx.low[entry_index]),
+                target_max, weekly_max,
             )
         )
-        probability = compute_probability(factor_results, weights)
+        factor_results.update(
+            evaluate_entry_target_factors(
+                bundle, zone, setup, setup["trigger_m15"]
+            )
+        )
+        total_probability = compute_probability(factor_results, weights)
 
+        entry_time = pd.Timestamp(bundle.ts[anchor_m15], tz="UTC")
         signals.append({
-            # The ENTRY bar, not the mitigation bar: simulate_trade walks
-            # from idx + 1, so a deferred entry that reported its trigger
-            # bar here would re-walk the deferral gap as if it were part
-            # of the trade.
+            # The H1 bar the FILL landed in. simulate_trade walks from
+            # idx + 1, so reporting the mitigation bar here would re-walk
+            # the wait for the order as if it were part of the trade.
             "idx": entry_index,
             "direction": direction,
             "entry_time": entry_time,
-            "entry_price": setup["entry_price"],
+            "entry_price": entry_price,
             "sl": setup["sl"],
-            "r_distance": setup["r_distance"],
-            "session": session,
-            "probability": probability,
+            "r_distance": r_distance,
+            # Read off the TRIGGER candle, which is the one decision 4
+            # gates on, not off the fill, which may land anywhere.
+            "session": session_for(
+                pd.Timestamp(bundle.ts[setup["trigger_m15"]], tz="UTC")
+            ),
+            # `probability` stays an alias of the total so anything reading
+            # the old key keeps working.
+            "probability": total_probability,
+            "htf_probability": htf_probability,
+            "total_probability": total_probability,
             "factor_results": factor_results,
+            "entry_model": setup["model"],
+            "m15_trigger_time": pd.Timestamp(
+                bundle.ts[setup["trigger_m15"]], tz="UTC"
+            ),
+            "m15_fill_time": (
+                entry_time if pending_as_of is None else None
+            ),
+            "order_host_candle": setup["host_m15"],
+            # Live only. None in the backtest, where a signal only exists
+            # once it has already filled.
+            "order_kind": setup.get("order_kind"),
+            "expires_m15": setup.get("expires_m15"),
             "ob_row": ob_row,
             "ob_touch_no": touch_no,
-            "ob_top": float(ctx.obs.series["H1"].top[ob_row]),
-            "ob_bottom": float(ctx.obs.series["H1"].bottom[ob_row]),
+            "ob_top": float(series.top[ob_row]),
+            "ob_bottom": float(series.bottom[ob_row]),
             "mitigation_idx": k,
             "mitigation_time": bar_timestamp(ctx, k),
             "entry_deferred": entry_index != k,
             "excluded_gates": sorted(set(ALL_FACTORS) - set(factor_results)),
-            # Frozen for the life of the trade, handed unchanged to
-            # simulate_trade so the mid-trade probability recheck can rebuild
-            # a live score without re-deriving the entry's own Mitigation OB.
-            "mitigation_factor_results": mitigation_factor_results,
+            "mitigation_factor_results": frozen,
+            # simulate_trade needs these to re-ask the M15 target gate every
+            # bar, which is the one entry factor that is not frozen.
+            "entry_zone": zone,
+            "entry_setup": setup,
         })
 
     return signals
@@ -278,6 +368,7 @@ def _intrabar_favourable_credit(ctx, k, sign, entry_price, stop, r_distance):
 def simulate_trade(
     ctx, idx, direction, entry_price, sl, r_distance, tp_levels=None,
     weights=None, threshold=None, mitigation_factor_results=None,
+    entry_zone=None, entry_setup=None,
 ):
     """Walks forward from the bar AFTER idx under the user's real trade
     management, with no take-profit (see the module docstring).
@@ -449,6 +540,20 @@ def simulate_trade(
                     target_max_distance, weekly_target_max_distance,
                 )
             )
+            # And the M15 target gate, for the same reason again, one level
+            # down. The user was explicit: an LRLQ target the price reaches
+            # and takes out drops OUT of the calculation, so the score falls
+            # back toward what the remaining untaken liquidity supports.
+            # Re-asked at THIS bar's M15 position, not the trigger's.
+            bundle = getattr(ctx, "m15_bundle", None)
+            if bundle is not None and entry_setup is not None:
+                m15_bar = m15_index_at_or_after(bundle, ctx.ts[k])
+                if m15_bar >= 0:
+                    live_factors.update(
+                        evaluate_entry_target_factors(
+                            bundle, entry_zone, entry_setup, m15_bar
+                        )
+                    )
             live_probability = compute_probability(live_factors, weights)
             if live_probability < threshold:
                 stop = entry_price

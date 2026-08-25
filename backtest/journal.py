@@ -61,6 +61,22 @@ JOURNAL_COLUMNS = [
     # be read after the fact: 100% of ten factors and 100% of seventy look
     # identical in the CSV, and they are not the same trade.
     "excluded_gates",
+    # The M15 entry layer. APPEND ONLY, at the end, so the column order of
+    # every stored journal is unchanged and an older CSV still lines up.
+    #
+    # entry_model is the single most useful column here: if one model is
+    # 90% of fills its gate is too loose, and that is invisible from
+    # probability alone. htf_probability and total_probability are both
+    # kept because the two gates are searched and fixed respectively, so
+    # reading one without the other cannot explain why a candidate was
+    # skipped.
+    "entry_model",
+    "htf_probability",
+    "total_probability",
+    "m15_trigger_time",
+    "m15_fill_time",
+    "order_host_candle",
+    "applied_htf_threshold",
 ]
 
 
@@ -145,7 +161,12 @@ def build_row(signal, walk, tp_result, settings):
         "trade_duration": exit_time - entry_time if exit_time is not None else None,
         "sl_excursion_pips": walk["sl_excursion_pips"],
         "taken": signal.get("taken", True),
-        "applied_threshold": settings.get("threshold"),
+        # The gate that actually decided `taken`. load_settings maps a
+        # legacy file's `threshold` onto total_threshold, so this is the
+        # right value for stored years too.
+        "applied_threshold": settings.get(
+            "total_threshold", settings.get("threshold")
+        ),
         "applied_max_sl_pips": settings.get("max_sl_size_pips"),
         "applied_tp_multiple": settings.get("tp_multiple"),
         "mitigation_time": signal.get("mitigation_time"),
@@ -156,6 +177,13 @@ def build_row(signal, walk, tp_result, settings):
         # Semicolon-joined rather than a list, so the CSV round-trips as a
         # plain string instead of a repr that has to be eval'ed back.
         "excluded_gates": ";".join(signal.get("excluded_gates", ())),
+        "entry_model": signal.get("entry_model"),
+        "htf_probability": signal.get("htf_probability"),
+        "total_probability": signal.get("total_probability"),
+        "m15_trigger_time": signal.get("m15_trigger_time"),
+        "m15_fill_time": signal.get("m15_fill_time"),
+        "order_host_candle": signal.get("order_host_candle"),
+        "applied_htf_threshold": settings.get("htf_threshold"),
     }
 
 

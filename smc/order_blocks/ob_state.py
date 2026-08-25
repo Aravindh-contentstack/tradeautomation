@@ -130,6 +130,16 @@ class ObSeries:
     touch_at: list
     quality: dict
     src_index: np.ndarray
+    # The largest structure tier that triggered this zone, e.g. "h1_swing".
+    # A per-OB STRING, so it cannot live in `quality`, which force-casts
+    # every entry to bool.
+    #
+    # Carried because the M15 entry models route on it: LC-1 is banned on
+    # the swing tier outright, and "H1 OB is fractal" / "H1 OB is internal"
+    # are two of the entry factors. Before this it existed only as a column
+    # on the OB table, which build_pipeline_bundle does not retain, so
+    # reaching it meant recomputing compute_h1_order_blocks from scratch.
+    primary_tier: np.ndarray = None
 
     def __len__(self):
         return len(self.top)
@@ -186,6 +196,7 @@ def to_h1_space(ob_table, tf_dates, h1_ts, timeframe):
             touch_at=[],
             quality={},
             src_index=empty_i,
+            primary_tier=np.zeros(0, dtype=object),
         )
 
     top = table["top"].to_numpy(dtype=np.float64)
@@ -261,6 +272,11 @@ def to_h1_space(ob_table, tf_dates, h1_ts, timeframe):
         touch_at=touch_at,
         quality=quality,
         src_index=np.arange(count, dtype=np.int64),
+        primary_tier=(
+            table["primary_tier"].to_numpy(dtype=object)
+            if "primary_tier" in table.columns
+            else np.full(count, None, dtype=object)
+        ),
     )
 
 
@@ -438,6 +454,10 @@ def _rebase_series(series, start, stop):
         touch_at=[np.clip(t - start, -1, length) for t in series.touch_at],
         quality=series.quality,
         src_index=series.src_index,
+        # Per-OB, not per-bar, so it is carried through unshifted, the same
+        # as top/bottom/sign/quality. Row ids stay stable across a rebase
+        # (see the docstring), so an unshifted per-OB array stays correct.
+        primary_tier=series.primary_tier,
     )
 
 

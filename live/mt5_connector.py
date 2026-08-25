@@ -34,6 +34,22 @@ TIMEFRAMES = {
     "D": mt5.TIMEFRAME_D1,
     "H4": mt5.TIMEFRAME_H4,
     "H1": mt5.TIMEFRAME_H1,
+    # The entry models detect structure and liquidity on M15, so the live
+    # bot needs the frame itself now, not just intrabar resolution.
+    "M15": mt5.TIMEFRAME_M15,
+}
+
+# Which MT5 order type a pending entry becomes, by (kind, direction).
+#
+# STOP for the LC models (price has to keep going our way to tag us) and
+# LIMIT for CE (price has to come BACK to us). Getting these two swapped
+# would place an order the broker fills instantly at the wrong side, so the
+# mapping is a table rather than a pair of nested conditionals.
+PENDING_ORDER_TYPES = {
+    ("stop", "bullish"): mt5.ORDER_TYPE_BUY_STOP,
+    ("stop", "bearish"): mt5.ORDER_TYPE_SELL_STOP,
+    ("limit", "bullish"): mt5.ORDER_TYPE_BUY_LIMIT,
+    ("limit", "bearish"): mt5.ORDER_TYPE_SELL_LIMIT,
 }
 
 
@@ -279,3 +295,88 @@ def get_closed_deal(ticket):
         "profit": d.profit,
         "time": _broker_epoch_to_utc(d.time),
     }
+
+
+def send_pending_order(symbol, kind, direction, volume, price, sl, tp,
+                       magic=0, comment=""):
+    """Rests a stop or limit order at `price`. Returns the same dict shape
+    as send_market_order.
+
+    kind is "stop" or "limit", direction is "bullish" or "bearish", both
+    matching backtest/entry_models.py's naming.
+
+    This exists because the backtest ASSUMES a resting order. Its fill is
+    the first M15 candle whose wick reaches the order price, which only a
+    real pending order reproduces. Market-ordering once the fill candle
+    closed would enter at that candle's close, which can be most of the way
+    to the stop, and would quietly discard the precision the whole entry
+    layer is for.
+    """
+    order_type = PENDING_ORDER_TYPES[(kind, direction)]
+    request = {
+        "action": mt5.TRADE_ACTION_PENDING,
+        "symbol": symbol,
+        "volume": volume,
+        "type": order_type,
+        "price": price,
+        "sl": sl,
+        "tp": tp,
+        "magic": magic,
+        "comment": comment,
+        # GTC, not a broker-side expiry. The N=2 window is measured in M15
+        # candles and this bot cancels on its own clock, so handing the
+        # broker a wall-clock expiry would be a second, disagreeing rule.
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_RETURN,
+    }
+    result = mt5.order_send(request)
+    if result is None:
+        return {"success": False, "retcode": None,
+                "comment": str(mt5.last_error()), "ticket": None}
+    success = result.retcode == mt5.TRADE_RETCODE_DONE
+    return {"success": success, "retcode": result.retcode,
+            "comment": result.comment, "ticket": result.order}
+
+
+def cancel_pending_order(ticket):
+    """Removes a resting order. True when it is gone, either way.
+
+    A ticket that no longer exists counts as success: it either filled or
+    was already cancelled, and both mean "there is nothing resting", which
+    is what the caller was asking for.
+    """
+    if not pending_order_exists(ticket):
+        return True
+    result = mt5.order_send({
+        "action": mt5.TRADE_ACTION_REMOVE,
+        "order": ticket,
+    })
+    if result is None:
+        return False
+    return result.retcode == mt5.TRADE_RETCODE_DONE
+
+
+def pending_order_exists(ticket):
+    orders = mt5.orders_get(ticket=ticket)
+    return orders is not None and len(orders) > 0
+
+
+def pending_orders(magic):
+    """Every resting order this bot owns, as plain dicts."""
+    orders = mt5.orders_get()
+    if not orders:
+        return []
+    out = []
+    for order in orders:
+        if order.magic != magic:
+            continue
+        out.append({
+            "ticket": order.ticket,
+            "symbol": order.symbol,
+            "type": order.type,
+            "volume": order.volume_current,
+            "price": order.price_open,
+            "sl": order.sl,
+            "tp": order.tp,
+        })
+    return out

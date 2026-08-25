@@ -58,6 +58,31 @@ THRESHOLD_QUANTILES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 # trades, which is exactly what it did for GBP_USD 2024 and XAU_USD 2024.
 MIN_TRADES_FOR_CONSIDERATION = 8
 
+# Where the FIXED htf_threshold is placed, as a quantile of the year's own
+# HTF probability distribution.
+#
+# Deliberately not searched, unlike total_threshold. Two reasons, both
+# measured rather than assumed:
+#
+# 1. THERE IS NOT ENOUGH DATA FOR TWO DIALS. The M15 entry layer produces
+#    a setup on about 12 to 17% of order-block mitigations, which is
+#    roughly 43 a year on EUR_USD. Searching two gates against 43 outcomes
+#    finds whichever pair happened to exclude a couple of losers that
+#    year, freezes it, and applies it to a year where it means nothing.
+#    MIN_TRADES_FOR_CONSIDERATION = 8 does not save us: it bounds the pool
+#    size, not the number of dials fitted to it.
+#
+# 2. THE HTF GATE IS LARGELY REDUNDANT. total_probability already CONTAINS
+#    the HTF factors, so a setup with a weak higher-timeframe picture
+#    mostly fails the total gate anyway. The HTF gate's real value is
+#    skipping the M15 scan when the picture is hopeless, which is a
+#    compute saving and a match to how the user trades manually, not an
+#    independent filter.
+#
+# So it sits low enough to discard only the clearly hopeless and let the
+# searched total_threshold do the actual work.
+HTF_GATE_QUANTILE = 0.1
+
 
 def _threshold_grid(candidates):
     """Probability thresholds drawn from the candidates' own quantiles.
@@ -66,12 +91,37 @@ def _threshold_grid(candidates):
     tightly produces a short grid rather than ten near-identical cut
     points that all admit the same pool.
     """
-    values = sorted(c["probability"] for c in candidates)
+    # total_probability where the entry layer produced one, falling back to
+    # `probability` for the pre-M15 path so an older journal still grids.
+    values = sorted(
+        c.get("total_probability", c["probability"]) for c in candidates
+    )
     n = len(values)
     if n == 0:
         return []
     thresholds = {round(values[min(int(q * (n - 1)), n - 1)], 2) for q in THRESHOLD_QUANTILES}
     return sorted(thresholds)
+
+
+def htf_gate_threshold(candidates, quantile=HTF_GATE_QUANTILE):
+    """The fixed permissive htf_threshold for a year, or None.
+
+    Read off the year's own HTF probability distribution for the same
+    reason _threshold_grid is: an absolute number cannot serve ten
+    instruments whose scores sit at different levels, and the normalised
+    formula in factors.compute_probability makes negative scores routine.
+
+    Returns None when nothing carries an htf_probability, which is the
+    pre-M15 path, and None correctly means "no gate".
+    """
+    values = sorted(
+        c["htf_probability"] for c in candidates
+        if c.get("htf_probability") is not None
+    )
+    n = len(values)
+    if n == 0:
+        return None
+    return round(values[min(int(quantile * (n - 1)), n - 1)], 2)
 
 
 def _max_sl_size_pips_grid(candidates, pip_size):
@@ -153,6 +203,7 @@ def recommend_global_settings(candidates, pip_size):
         return None
 
     best = None
+    htf_gate = htf_gate_threshold(candidates)
     threshold_grid = _threshold_grid(candidates)
     for max_sl_size_pips in _max_sl_size_pips_grid(candidates, pip_size):
         max_sl_size_price = max_sl_size_pips * pip_size
@@ -160,7 +211,8 @@ def recommend_global_settings(candidates, pip_size):
 
         for threshold in threshold_grid:
             pool_by_threshold = [
-                c for c in pool_by_sl if c["probability"] >= threshold
+                c for c in pool_by_sl
+                if c.get("total_probability", c["probability"]) >= threshold
             ]
             if len(pool_by_threshold) < MIN_TRADES_FOR_CONSIDERATION:
                 continue
@@ -171,7 +223,13 @@ def recommend_global_settings(candidates, pip_size):
                 )
 
                 candidate_settings = {
+                    # Both names are written. `total_threshold` is what
+                    # is_taken reads; `threshold` is kept so a settings
+                    # file stays readable by anything predating the entry
+                    # layer, and so the two can never disagree.
+                    "total_threshold": threshold,
                     "threshold": threshold,
+                    "htf_threshold": htf_gate,
                     "tp_multiple": tp_multiple,
                     "max_sl_size_pips": max_sl_size_pips,
                     "roi_r": total_r,

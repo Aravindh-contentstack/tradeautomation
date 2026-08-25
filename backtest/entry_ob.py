@@ -18,19 +18,31 @@ earlier one did not already absorb, so it is not a fresh opportunity, and
 order_blocks._apply_touch_lifecycle has already worked out which touches
 qualify.
 
-The killzone pre-window
------------------------
-Price often taps the zone before the session and then simply travels
-during it, so requiring the touch itself to land inside the killzone would
-miss the setup entirely. A touch in the hour immediately before a session
-counts, with the entry deferred to that session's first candle.
+What this module no longer does
+------------------------------
+It used to own two more things, both superseded by the M15 entry models
+and REMOVED rather than left sitting unused:
+
+  resolve_entry_bar   the H1 killzone gate, with its pre-window deferral.
+                      The session gate moved to where it now matters,
+                      which is the M15 candle that completes the setup
+                      (entry_models._in_killzone). Gating the H1 touch as
+                      well would reject setups whose entry lands in a
+                      session perfectly well.
+  build_setup         entry at the close of the mitigating candle with the
+                      stop beyond the zone's far edge. That was always
+                      described in roadmap/supply-and-demand.md as "a
+                      placeholder until the M15 entry models land", and
+                      they have. Price and stop now come from the trigger
+                      candle (backtest/entry_models.py).
+
+Both were deleted instead of deprecated because leaving them importable
+invites wiring them back in, and each encodes a rule the strategy has
+explicitly moved off.
+
+What stays here is the trigger question (which touches are candidates) and
+the four distance and buffer constants, which the entry models read.
 """
-
-from backtest import killzone
-
-# The hour before each session opens. Derived from the session bounds
-# rather than written as literals so the two cannot drift apart.
-PRE_WINDOW_HOURS = (killzone.LONDON_START_HOUR - 1, killzone.NY_START_HOUR - 1)
 
 # The stop sits this many pips beyond the zone's far edge, not on it. Same
 # reasoning as the fractal-based stop it replaces: the edge is a level
@@ -81,68 +93,3 @@ def iter_mitigation_candidates(ctx):
         ob_row = int(trigger_ob[k])
         if ob_row >= 0:
             yield k, ob_row, int(obs.trigger_touch_no[k])
-
-
-def resolve_entry_bar(ctx, k):
-    """The killzone gate. Returns the bar whose close is the entry, or None.
-
-    A touch inside a session enters on that same candle. A touch in the
-    hour before a session defers to the next candle, which is the
-    session's first. Anything else is outside the hours the strategy
-    trades and produces no candidate at all.
-    """
-    hour = int(ctx.london_hour[k])
-    if killzone.LONDON_START_HOUR <= hour < killzone.LONDON_END_HOUR:
-        return k
-    if killzone.NY_START_HOUR <= hour < killzone.NY_END_HOUR:
-        return k
-    if hour in PRE_WINDOW_HOURS and k + 1 < len(ctx.london_hour):
-        next_hour = int(ctx.london_hour[k + 1])
-        in_session = (
-            killzone.LONDON_START_HOUR <= next_hour < killzone.LONDON_END_HOUR
-            or killzone.NY_START_HOUR <= next_hour < killzone.NY_END_HOUR
-        )
-        if in_session:
-            return k + 1
-    return None
-
-
-def build_setup(ctx, ob_row, entry_index, pip_size):
-    """Direction, entry, and stop for one mitigation. None if unusable.
-
-    Two rejections exist only because entry and stop now come from
-    different places, which was impossible when both derived from the same
-    fractal break:
-
-    - A deferred entry can close BEYOND the edge the stop sits under, so
-      the trade would open already past its own stop. Guarded explicitly
-      rather than left to produce a negative or absurd R.
-    - A zone narrow enough to give a stop of a couple of pips inflates
-      every R multiple it produces, so those setups are dropped.
-    """
-    series = ctx.obs.series["H1"]
-    bullish = series.sign[ob_row] > 0
-    buffer_price = SL_BUFFER_PIPS * pip_size
-
-    if bullish:
-        direction = "bullish"
-        sl = float(series.bottom[ob_row]) - buffer_price
-    else:
-        direction = "bearish"
-        sl = float(series.top[ob_row]) + buffer_price
-
-    entry_price = float(ctx.close[entry_index])
-    sign = 1 if bullish else -1
-    if (entry_price - sl) * sign <= 0:
-        return None
-
-    r_distance = abs(entry_price - sl)
-    if r_distance < MIN_R_PIPS * pip_size:
-        return None
-
-    return {
-        "direction": direction,
-        "entry_price": entry_price,
-        "sl": sl,
-        "r_distance": r_distance,
-    }

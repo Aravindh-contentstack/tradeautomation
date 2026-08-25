@@ -271,6 +271,97 @@ KIND_FOR = {
     "previous_week": "previous_week",
 }
 
+# --- the M15 entry tier ----------------------------------------------
+#
+# The names live here rather than in backtest/entry_factors.py so this
+# module keeps its zero imports. entry_factors.py reaches a long way for
+# its evaluation logic (pandas, numpy, the smc detectors, the M15 bundle),
+# and hanging all of that off ALL_FACTORS by a transitive import would
+# undo the property the rest of this file goes out of its way to keep,
+# down to testing NaN by self-comparison instead of importing math.
+#
+# So the dependency points the other way: this module owns the names,
+# exactly as it already owns every other gate's names, and
+# entry_factors.py imports them.
+#
+# Only the FIRING model's set is ever evaluated, so at most eight of these
+# appear in one candidate's factor_results and the rest are omitted.
+# compute_probability's denominator is therefore model-specific, which
+# means entry scores are NOT comparable across models. Documented at
+# length in entry_factors.py.
+
+ENTRY_MODEL_KEYS = {"LC-1": "lc1", "LC-2A": "lc2a", "LC-2B": "lc2b", "CE": "ce"}
+
+# In the order factors/eu_probability_factors.csv lists them, so the sheet
+# and the code can be compared by eye.
+#
+# CE has FOUR, not five. `ibos_with_body_close` is absent on purpose: CE
+# only ever triggers on a close-through break, so the factor could only
+# answer yes. See entry_models.py on why CE refuses wick-only breaks where
+# LC-2A accepts them.
+ENTRY_MODEL_FACTORS = {
+    "LC-1": (
+        "h1_ob_is_fractal",
+        "wicked_the_lid",
+        "lid_with_fvg",
+        "no_imbalance_while_mitigation",
+        "no_other_lids",
+    ),
+    "LC-2A": (
+        "fake_break_with_body_close",
+        "wicked_the_pbid",
+        "h1_ob_is_fractal",
+        "lid_with_fvg",
+        "no_other_lids",
+    ),
+    "LC-2B": (
+        "equals_formed_with_less_angle",
+        "h1_ob_is_fractal",
+        "lid_with_fvg",
+        "wicked_the_pbid",
+        "no_other_lids",
+    ),
+    "CE": (
+        "h1_ob_is_internal",
+        "has_imbalance",
+        "has_inducements",
+        "no_other_lids",
+    ),
+}
+
+ENTRY_TARGET_PARENT = "m15_target_liquidity"
+ENTRY_TARGET_CHILDREN = ("lrlq", "equals")
+
+# Fixed model order, so ENTRY_FACTORS is stable. APPEND ONLY, like every
+# other list here: target_log.py derives bit positions from list order.
+ENTRY_MODELS = ("LC-1", "LC-2A", "LC-2B", "CE")
+
+
+def entry_factor_name(model, suffix):
+    return "entry_%s_%s" % (ENTRY_MODEL_KEYS[model], suffix)
+
+
+def entry_model_factor_names(model):
+    """Every factor name for one model, target parent and children included."""
+    names = [entry_factor_name(model, s) for s in ENTRY_MODEL_FACTORS[model]]
+    names.append(entry_factor_name(model, ENTRY_TARGET_PARENT))
+    for child in ENTRY_TARGET_CHILDREN:
+        names.append(
+            entry_factor_name(model, "%s_%s" % (ENTRY_TARGET_PARENT, child))
+        )
+    return names
+
+
+def _entry_gate_names():
+    names = []
+    for model in ENTRY_MODELS:
+        names.extend(entry_model_factor_names(model))
+    return names
+
+
+ENTRY_FACTORS = _entry_gate_names()
+
+
 ALL_FACTORS = (
     ALWAYS_FACTORS
     + MITIGATION_OB_FACTORS
@@ -278,6 +369,7 @@ ALL_FACTORS = (
     + SWEPT_LIQUIDITY_GATE_FACTORS
     + LIQUIDITY_TARGET_FACTORS
     + MITIGATION_LEG_FACTORS
+    + ENTRY_FACTORS
 )
 
 

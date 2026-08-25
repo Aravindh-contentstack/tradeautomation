@@ -97,7 +97,8 @@ def _window(frame, start, end):
 
 
 def run_year(df, year, *, pip_size, frozen_weights, settings,
-             m15_df=None, tp_levels=None, walk_tail=DEFAULT_WALK_TAIL,
+             m15_df=None, m15_bundle=None, tp_levels=None,
+             walk_tail=DEFAULT_WALK_TAIL,
              obs=None, liq=None, log_targets=False, instrument=None):
     """Simulates and journals EVERY gate-passing candidate of `year`.
 
@@ -155,6 +156,12 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
         m15_df=_window(m15_df, start, end + tail),
         obs=window_obs,
         liq=window_liq,
+        # Passed through WHOLE, unlike obs/liq/m15_df above, all three of
+        # which are cut to the walk window. The bundle is indexed on its own
+        # full M15 history and the entry models cross into it by timestamp,
+        # so windowing it here would blind LC-1 to every level formed just
+        # across a year boundary. See backtest/m15_pipeline.py.
+        m15_bundle=m15_bundle,
     )
 
     # find_signals runs over the whole walk frame and the tail's signals are
@@ -163,7 +170,11 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
     # would mis-address every bar. The cost is nil: find_signals only iterates
     # the handful of OB-mitigation bars, of which the tail holds a few.
     signals = [
-        s for s in find_signals(ctx, frozen_weights, pip_size) if s["entry_time"] < end
+        s for s in find_signals(
+            ctx, frozen_weights, pip_size,
+            htf_threshold=settings.get("htf_threshold"),
+        )
+        if s["entry_time"] < end
     ]
     apply_settings(signals, settings, pip_size)
 
@@ -190,8 +201,17 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
         if signal["taken"]:
             recheck_kwargs = dict(
                 weights=frozen_weights,
-                threshold=settings.get("threshold"),
+                # The recheck compares a FULL score (HTF plus entry plus
+                # both target gates) so it has to use the total threshold,
+                # not the legacy one. load_settings maps an old file's
+                # `threshold` onto total_threshold, so this reads correctly
+                # for every stored year too.
+                threshold=settings.get("total_threshold"),
                 mitigation_factor_results=signal["mitigation_factor_results"],
+                # Needed to re-ask the M15 target gate, the one entry
+                # factor that is not frozen at entry.
+                entry_zone=signal.get("entry_zone"),
+                entry_setup=signal.get("entry_setup"),
             )
         else:
             recheck_kwargs = {}

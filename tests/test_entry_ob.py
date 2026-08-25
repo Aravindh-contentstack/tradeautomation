@@ -1,77 +1,78 @@
-"""The killzone gate and the probability normalisation.
+"""The M15 killzone gate and the probability normalisation.
 
 London civil time is what the strategy trades against, so the killzone
 fixtures are built from UTC timestamps chosen to land on the intended
 LONDON hour, and two of them sit on DST boundary days precisely because
 that is where a naive fixed-offset implementation would disagree.
+
+The gate under test MOVED. It used to be entry_ob.resolve_entry_bar,
+which gated the H1 order-block touch and deferred an entry from the hour
+before a session into its open. Decision 4 moved the session gate to the
+M15 candle that completes the setup, and resolve_entry_bar was deleted
+rather than left unused. The DST coverage came with it, because that is
+the part of it worth keeping: an M15 bundle derives london_hour through
+killzone.london_fields, so the same fixed-offset bug is still reachable.
 """
 
 import pandas as pd
 import pytest
 
-from backtest.entry_ob import resolve_entry_bar
+from backtest.entry_models import _in_killzone
 from backtest.factors import compute_probability
-from tests.conftest import ctx_for
+from backtest.m15_pipeline import build_m15_bundle
 
 
-def ctx_at(london_hours, day="2024-06-03"):
-    """A context whose bars land on the given LONDON hours of one day.
+def m15_at(london_hours, day="2024-06-03"):
+    """An M15 bundle whose bars land on the given LONDON hours of one day.
 
     Built by naming the local times and converting, rather than adding a
     fixed offset to UTC, so the fixture stays correct in both BST and GMT.
     """
-    bars = []
+    rows = []
     for hour in london_hours:
         local = pd.Timestamp("%s %02d:00" % (day, hour), tz="Europe/London")
-        bars.append((local.tz_convert("UTC"), 1.1, 1.1, 1.1, 1.1))
-    return ctx_for(bars)
+        rows.append({
+            "date": local.tz_convert("UTC"),
+            "open": 1.1, "high": 1.1, "low": 1.1, "close": 1.1,
+        })
+    return build_m15_bundle(pd.DataFrame(rows))
 
 
-class TestKillzoneGate:
-    def test_a_touch_inside_london_enters_on_its_own_candle(self):
-        ctx = ctx_at([7, 8, 9])
-        assert resolve_entry_bar(ctx, 0) == 0
-        assert resolve_entry_bar(ctx, 2) == 2
+class TestM15KillzoneGate:
+    def test_london_hours_are_inside(self):
+        bundle = m15_at([7, 8, 9])
+        assert [_in_killzone(bundle, j) for j in range(3)] == [True] * 3
 
-    def test_a_touch_inside_new_york_enters_on_its_own_candle(self):
-        ctx = ctx_at([12, 13, 14])
-        assert resolve_entry_bar(ctx, 1) == 1
-
-    def test_the_hour_before_london_defers_to_the_open(self):
-        ctx = ctx_at([6, 7])
-        assert resolve_entry_bar(ctx, 0) == 1
-
-    def test_the_hour_before_new_york_defers_to_the_open(self):
-        ctx = ctx_at([11, 12])
-        assert resolve_entry_bar(ctx, 0) == 1
+    def test_new_york_hours_are_inside(self):
+        bundle = m15_at([12, 13, 14])
+        assert [_in_killzone(bundle, j) for j in range(3)] == [True] * 3
 
     def test_the_close_of_a_session_is_outside_it(self):
-        """10:00 and 15:00 are the exclusive ends of the two windows, so a
-        touch there is not in a session and is not a pre-window either.
-        """
-        ctx = ctx_at([10, 11])
-        assert resolve_entry_bar(ctx, 0) is None
+        """End-exclusive: 10:00 is not London and 15:00 is not New York."""
+        bundle = m15_at([10, 15])
+        assert [_in_killzone(bundle, j) for j in range(2)] == [False, False]
 
-    def test_a_touch_outside_every_window_produces_nothing(self):
-        ctx = ctx_at([2, 3, 4])
-        assert resolve_entry_bar(ctx, 0) is None
-        assert resolve_entry_bar(ctx, 1) is None
-
-    def test_a_pre_window_touch_not_followed_by_a_session_is_rejected(self):
-        """06:00 only counts because 07:00 opens London. Without that next
-        bar in the data there is nothing to defer to.
+    def test_the_hour_before_a_session_is_outside_it(self):
+        """The pre-window deferral went with resolve_entry_bar. A trigger
+        candle either closes in a session or it does not count.
         """
-        ctx = ctx_at([6])
-        assert resolve_entry_bar(ctx, 0) is None
+        bundle = m15_at([6, 11])
+        assert [_in_killzone(bundle, j) for j in range(2)] == [False, False]
+
+    def test_the_gap_between_sessions_is_outside(self):
+        bundle = m15_at([11, 16, 3])
+        assert [_in_killzone(bundle, j) for j in range(3)] == [False] * 3
 
     @pytest.mark.parametrize("day", ["2024-03-31", "2024-10-27"])
     def test_the_gate_holds_across_both_dst_transitions(self, day):
         """The UK clocks change at 01:00/02:00 local on these two days, so
         the session hours are the same local hours but different UTC ones.
+        A fixed-offset implementation gets exactly these two days wrong.
         """
-        ctx = ctx_at([6, 7], day=day)
-        assert resolve_entry_bar(ctx, 0) == 1
-        assert resolve_entry_bar(ctx, 1) == 1
+        bundle = m15_at([6, 7, 9, 10], day=day)
+        assert [_in_killzone(bundle, j) for j in range(4)] == [
+            False, True, True, False
+        ]
 
 
 class TestProbabilityNormalisation:

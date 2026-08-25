@@ -1,19 +1,23 @@
 {
   "applied": {
-    "threshold": 2.94,
-    "tp_multiple": 4.0,
-    "max_sl_size_pips": 100.0
+    "htf_threshold": -10.87,
+    "total_threshold": 26.74,
+    "threshold": 26.74,
+    "tp_multiple": 3.5,
+    "max_sl_size_pips": 12.8
   },
   "recommended": {
-    "threshold": -7.25,
+    "total_threshold": 21.38,
+    "threshold": 21.38,
+    "htf_threshold": -7.6,
     "tp_multiple": 3.5,
-    "max_sl_size_pips": 70.7,
-    "roi_r": 19.168092877042255,
-    "strike_rate": 0.3333333333333333,
-    "avg_r": 0.14094185939001658,
-    "breakeven_count": 19,
-    "trade_count": 136
+    "max_sl_size_pips": 16.5,
+    "roi_r": 16.5,
+    "strike_rate": 0.4666666666666667,
+    "avg_r": 1.1,
+    "breakeven_count": 0,
+    "trade_count": 15
   },
-  "candidate_count": 169,
-  "taken_count": 102
+  "candidate_count": 31,
+  "taken_count": 5
 }
