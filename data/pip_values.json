@@ -1,0 +1,117 @@
+{
+  "as_of": "2026-08-26",
+  "generated_at": "2026-08-27T03:06:26.161892+00:00",
+  "source": "https://api.frankfurter.app (ECB reference rates)",
+  "lot_size": 100000,
+  "note": "USD value of a 1-pip move for a standard 100,000-unit lot, computed from the ECB reference rate on 'as_of'. Rates move daily, so treat this as a reference snapshot: re-run scripts/fetch_pip_values.py for a fresh one. For mini/micro lots divide by 10 / 100. XAU_USD is intentionally excluded, see this script's docstring.",
+  "pairs": {
+    "AUD_CAD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.214
+    },
+    "AUD_CHF": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 12.4403
+    },
+    "AUD_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    },
+    "AUD_NZD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 5.9591
+    },
+    "AUD_USD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 10.0
+    },
+    "CAD_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    },
+    "CHF_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    },
+    "EUR_AUD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.1849
+    },
+    "EUR_CAD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.214
+    },
+    "EUR_CHF": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 12.4403
+    },
+    "EUR_GBP": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 13.6299
+    },
+    "EUR_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    },
+    "EUR_NZD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 5.9591
+    },
+    "EUR_USD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 10.0
+    },
+    "GBP_AUD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.1849
+    },
+    "GBP_CAD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.214
+    },
+    "GBP_CHF": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 12.4403
+    },
+    "GBP_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    },
+    "GBP_NZD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 5.9591
+    },
+    "GBP_USD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 10.0
+    },
+    "NZD_CAD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.214
+    },
+    "NZD_CHF": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 12.4403
+    },
+    "NZD_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    },
+    "NZD_USD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 10.0
+    },
+    "USD_CAD": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 7.214
+    },
+    "USD_CHF": {
+      "pip_size": 0.0001,
+      "pip_value_usd": 12.4403
+    },
+    "USD_JPY": {
+      "pip_size": 0.01,
+      "pip_value_usd": 6.2865
+    }
+  }
+}

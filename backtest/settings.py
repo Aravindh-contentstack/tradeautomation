@@ -28,6 +28,8 @@ filter should have been used.
 import json
 import os
 
+from backtest.entry_ob import SL_BUFFER_PIPS
+
 # None means "no filter", not "zero". 2020 bootstraps here with nothing to carry
 # forward, so it takes every candidate at the spec's 2.5R.
 #
@@ -42,12 +44,25 @@ import os
 # `threshold` is kept for the legacy files on disk and for the pre-M15 baseline
 # path. load_settings maps a file carrying only `threshold` onto
 # total_threshold, so five years of stored settings keep working.
+# sl_buffer_pips is the one entry-GEOMETRY setting carried here, and it
+# defaults to entry_ob.SL_BUFFER_PIPS rather than to None. None means "no
+# filter" for the thresholds above, but there is no such thing as "no stop
+# buffer" -- every setup needs some number to place its stop, so the
+# absence of a stored value means the shipped default, not the absence of
+# a buffer. Every settings file written before this key existed therefore
+# keeps behaving exactly as it did.
+#
+# It lives in settings because it has to be PER INSTRUMENT: the tuning
+# found 2 pips right for EUR_USD and 0.5 for GBP_JPY, and a module
+# constant cannot say both. Consumers must read it through
+# backtest.entry_params, never by importing the constant.
 DEFAULT_SETTINGS = {
     "htf_threshold": None,
     "total_threshold": None,
     "threshold": None,
     "tp_multiple": 2.5,
     "max_sl_size_pips": None,
+    "sl_buffer_pips": SL_BUFFER_PIPS,
 }
 
 

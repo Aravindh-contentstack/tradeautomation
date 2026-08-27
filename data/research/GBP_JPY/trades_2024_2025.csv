@@ -1,0 +1,29 @@
+date,day,start_time,end_time,duration,session,htf_strength,trade_strength,final_probability,trade_outcome_r,entry_model,direction,taken,exit_reason,terminal_r,sl_buffer_pips,tp_multiple,min_live_probability,year
+Jan 8 2024,Monday,13:30,01:00,11:30,New York,28.00%,44.19%,48.94%,0.0,CE,bullish,True,be_stop,0.0,2.0,,44.19%,2024
+Feb 28 2024,Wednesday,07:45,08:00,00:15,London,28.26%,30.49%,33.33%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,33.33%,2024
+Mar 15 2024,Friday,07:15,08:00,00:45,London,25.00%,38.78%,33.33%,2.5,LC-2A,bullish,True,tp,3.5583,2.0,,21.25%,2024
+May 7 2024,Tuesday,09:15,13:00,03:45,London,40.00%,42.65%,45.83%,2.5,LC-2A,bullish,True,tp,0.0,2.0,,42.65%,2024
+May 28 2024,Tuesday,13:30,19:00,05:30,New York,28.00%,36.36%,29.69%,0.0,LC-1,bullish,True,be_stop,0.0,2.0,,27.42%,2024
+Jun 13 2024,Thursday,13:30,15:00,01:30,New York,28.26%,32.26%,37.10%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,37.10%,2024
+Jun 21 2024,Friday,14:15,15:00,00:45,New York,42.31%,41.67%,36.84%,-1.0,LC-1,bearish,True,sl,-1.0,2.0,,36.84%,2024
+Jun 28 2024,Friday,08:15,10:00,01:45,London,28.26%,32.26%,34.38%,-1.0,CE,bullish,True,sl,-1.0,2.0,,34.38%,2024
+Jul 15 2024,Monday,15:00,17:00,02:00,New York,30.77%,39.19%,31.43%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,35.23%,2024
+Aug 2 2024,Friday,13:45,19:00,05:15,New York,47.83%,30.36%,32.76%,0.7045,CE,bearish,True,friday_close,0.7045,2.0,,30.36%,2024
+Sep 9 2024,Monday,08:00,10:00,02:00,London,55.56%,61.54%,59.76%,-1.0,CE,bearish,True,sl,-1.0,2.0,,59.76%,2024
+Oct 1 2024,Tuesday,14:15,15:00,00:45,New York,28.00%,30.49%,13.64%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,25.00%,2024
+Nov 15 2024,Friday,12:15,13:00,00:45,New York,27.78%,31.08%,22.73%,2.5,LC-2A,bearish,True,tp,13.6733,2.0,,20.59%,2024
+Dec 3 2024,Tuesday,09:15,11:00,01:45,London,27.78%,25.00%,25.00%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,25.00%,2024
+Dec 23 2024,Monday,09:30,10:00,00:30,London,28.26%,36.36%,42.65%,-1.0,CE,bullish,True,sl,-1.0,2.0,,42.65%,2024
+Jan 15 2025,Wednesday,14:15,01:00,10:45,New York,25.00%,29.41%,34.62%,2.5,LC-1,bearish,True,tp,3.9956,2.0,,27.27%,2025
+Mar 4 2025,Tuesday,14:00,15:00,01:00,New York,30.77%,37.80%,26.74%,-1.0,LC-2B,bullish,True,sl,-1.0,2.0,,26.74%,2025
+Mar 26 2025,Wednesday,09:30,15:00,05:30,London,42.31%,46.88%,52.44%,2.5,LC-2A,bullish,True,tp,0.0,2.0,,43.75%,2025
+Apr 21 2025,Monday,14:30,19:00,04:30,New York,46.00%,45.83%,62.50%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,50.00%,2025
+Apr 22 2025,Tuesday,09:00,10:00,01:00,London,54.35%,41.94%,43.75%,-1.0,CE,bearish,True,sl,-1.0,2.0,,43.75%,2025
+Jul 7 2025,Monday,09:45,10:00,00:15,London,30.77%,40.70%,37.50%,2.5,LC-2A,bullish,True,tp,9.8913,2.0,,34.38%,2025
+Jul 11 2025,Friday,12:15,13:00,00:45,New York,44.29%,54.72%,52.13%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,52.13%,2025
+Jul 16 2025,Wednesday,08:15,10:00,01:45,London,28.26%,34.38%,36.36%,-1.0,LC-2B,bullish,True,sl,-1.0,2.0,,34.38%,2025
+Jul 29 2025,Tuesday,13:15,14:00,00:45,New York,55.00%,48.94%,46.88%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,43.33%,2025
+Aug 1 2025,Friday,13:30,14:00,00:30,New York,35.71%,34.91%,26.47%,-1.0,LC-1,bullish,True,sl,-1.0,2.0,,26.47%,2025
+Aug 20 2025,Wednesday,09:15,14:00,04:45,London,25.00%,34.38%,30.00%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,25.00%,2025
+Aug 26 2025,Tuesday,08:15,12:00,03:45,London,28.26%,40.00%,36.67%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,36.67%,2025
+Oct 24 2025,Friday,13:15,15:00,01:45,New York,28.26%,29.69%,25.00%,0.0,LC-2A,bullish,True,be_stop,0.0,2.0,,22.58%,2025

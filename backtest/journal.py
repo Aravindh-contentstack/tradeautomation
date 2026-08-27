@@ -138,11 +138,21 @@ def build_row(signal, walk, tp_result, settings):
         "direction": signal["direction"],
         "entry_price": signal["entry_price"],
         "sl_price": signal["sl"],
-        "tp_price": tp_price_for(
-            signal["entry_price"],
-            signal["direction"],
-            signal["r_distance"],
-            settings["tp_multiple"],
+        # None means the row describes a trade managed with no target at
+        # all, which apply_tp has always supported and this had not: it
+        # multiplied None by the stop distance and raised. The research
+        # harness journals exactly that kind of row (backtest/research/),
+        # and a TP-free walk having no TP price is the honest answer
+        # rather than a placeholder one.
+        "tp_price": (
+            tp_price_for(
+                signal["entry_price"],
+                signal["direction"],
+                signal["r_distance"],
+                settings["tp_multiple"],
+            )
+            if settings.get("tp_multiple") is not None
+            else None
         ),
         "exit_price": tp_result.get("exit_price", walk["terminal_price"]),
         "sl_size": signal["r_distance"],

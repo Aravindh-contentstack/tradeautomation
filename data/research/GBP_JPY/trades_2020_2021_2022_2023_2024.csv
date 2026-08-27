@@ -1,0 +1,68 @@
+date,day,start_time,end_time,duration,session,htf_strength,trade_strength,final_probability,trade_outcome_r,entry_model,direction,taken,exit_reason,terminal_r,sl_buffer_pips,tp_multiple,min_live_probability,year
+Jan 9 2020,Thursday,14:15,19:00,28:45,New York,29.69%,31.82%,37.00%,0.8534,CE,bullish,True,friday_close,0.8534,2.0,,30.36%,2020
+Feb 12 2020,Wednesday,07:15,08:00,00:45,London,28.26%,37.80%,29.41%,2.5,LC-1,bullish,True,tp,0.0,2.0,,22.58%,2020
+Mar 4 2020,Wednesday,07:45,08:00,00:15,London,56.25%,54.17%,51.35%,2.5,CE,bearish,True,tp,-1.0,2.0,,51.35%,2020
+Mar 27 2020,Friday,09:00,10:00,01:00,London,28.26%,29.79%,31.52%,-1.0,CE,bearish,True,sl,-1.0,2.0,,31.52%,2020
+Apr 22 2020,Wednesday,14:15,15:00,00:45,New York,54.35%,43.24%,39.19%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,35.71%,2020
+May 21 2020,Thursday,08:30,09:00,00:30,London,34.78%,28.57%,30.23%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,30.23%,2020
+Jun 2 2020,Tuesday,07:30,13:00,05:30,London,28.26%,27.42%,25.00%,2.5,CE,bullish,True,tp,8.893,2.0,,25.00%,2020
+Jun 10 2020,Wednesday,08:15,09:00,00:45,London,25.00%,35.23%,37.21%,-1.0,LC-1,bullish,True,sl,-1.0,2.0,,37.21%,2020
+Jun 22 2020,Monday,09:15,10:00,00:45,London,32.76%,26.92%,35.71%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,35.71%,2020
+Jul 3 2020,Friday,07:15,08:00,00:45,London,47.83%,38.46%,50.00%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,50.00%,2020
+Jul 23 2020,Thursday,09:45,12:00,02:15,London,27.78%,32.89%,36.17%,-1.0,LC-1,bullish,True,sl,-1.0,2.0,,36.17%,2020
+Jul 29 2020,Wednesday,07:15,11:00,03:45,London,42.31%,51.25%,36.36%,2.5,LC-2A,bullish,True,tp,21.2847,2.0,,43.24%,2020
+Aug 18 2020,Tuesday,08:45,09:00,00:15,London,25.00%,26.74%,23.26%,0.0,LC-1,bearish,True,be_stop,0.0,2.0,,23.26%,2020
+Sep 7 2020,Monday,09:15,10:00,00:45,London,41.30%,45.45%,56.58%,2.5,LC-1,bearish,True,tp,25.6575,2.0,,32.14%,2020
+Oct 30 2020,Friday,12:15,13:00,00:45,New York,28.26%,32.14%,32.14%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,32.14%,2020
+Dec 11 2020,Friday,07:45,08:00,00:15,London,41.30%,39.19%,31.43%,2.5,CE,bearish,True,tp,2.7491,2.0,,29.69%,2020
+Dec 14 2020,Monday,12:45,14:00,01:15,New York,27.59%,33.33%,39.29%,2.5,LC-1,bearish,True,tp,0.0,2.0,,28.41%,2020
+Jan 11 2021,Monday,08:15,10:00,01:45,London,28.26%,37.50%,41.67%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,41.67%,2021
+Feb 11 2021,Thursday,14:00,15:00,01:00,New York,37.93%,47.50%,52.44%,-1.0,CE,bullish,True,sl,-1.0,2.0,,52.44%,2021
+Mar 24 2021,Wednesday,13:45,14:00,00:15,New York,37.50%,45.12%,40.00%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,40.00%,2021
+Apr 12 2021,Monday,13:30,15:00,01:30,New York,28.26%,40.00%,41.30%,-1.0,LC-1,bullish,True,sl,-1.0,2.0,,40.00%,2021
+Apr 21 2021,Wednesday,08:00,09:00,01:00,London,37.93%,42.05%,40.00%,2.5,CE,bullish,True,tp,-1.0,2.0,,40.00%,2021
+May 19 2021,Wednesday,08:45,13:00,04:15,London,28.26%,38.24%,40.91%,-1.0,CE,bullish,True,sl,-1.0,2.0,,39.06%,2021
+Jul 30 2021,Friday,07:15,10:00,02:45,London,25.00%,38.04%,43.24%,2.5,LC-2A,bullish,True,tp,-1.0,2.0,,26.83%,2021
+Aug 5 2021,Thursday,08:00,12:00,04:00,London,28.00%,28.26%,36.17%,-1.0,CE,bullish,True,sl,-1.0,2.0,,34.78%,2021
+Aug 13 2021,Friday,15:00,19:00,04:00,New York,41.30%,46.43%,39.19%,1.782,LC-1,bearish,True,friday_close,1.782,2.0,,39.19%,2021
+Aug 18 2021,Wednesday,14:15,18:00,03:45,New York,30.36%,26.74%,31.82%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,31.82%,2021
+Nov 11 2021,Thursday,08:45,06:00,21:15,London,31.43%,35.71%,34.00%,0.0,CE,bearish,True,be_stop,0.0,2.0,,30.00%,2021
+Dec 2 2021,Thursday,07:15,08:00,00:45,London,41.30%,47.50%,35.14%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,35.14%,2021
+Dec 2 2021,Thursday,14:45,19:00,04:15,New York,34.78%,45.83%,50.00%,0.0,CE,bearish,True,be_stop,0.0,2.0,,45.83%,2021
+Jan 7 2022,Friday,08:15,13:00,04:45,London,28.26%,31.52%,34.38%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,28.26%,2022
+Mar 3 2022,Thursday,14:00,15:00,01:00,New York,50.00%,43.75%,39.47%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,39.47%,2022
+Jun 27 2022,Monday,07:45,02:00,18:15,London,41.30%,44.19%,48.78%,0.0,CE,bullish,True,be_stop,0.0,2.0,,31.08%,2022
+Nov 1 2022,Tuesday,14:30,15:00,00:30,New York,43.75%,53.85%,53.85%,-1.0,CE,bullish,True,sl,-1.0,2.0,,53.85%,2022
+Nov 30 2022,Wednesday,13:15,14:00,00:45,New York,40.00%,38.04%,26.92%,-1.0,LC-1,bearish,True,sl,-1.0,2.0,,26.92%,2022
+Dec 8 2022,Thursday,09:30,10:00,00:30,London,37.50%,39.36%,43.75%,-1.0,LC-1,bullish,True,sl,-1.0,2.0,,43.75%,2022
+Dec 13 2022,Tuesday,14:45,16:00,01:15,New York,27.59%,33.33%,39.36%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,36.17%,2022
+Jan 16 2023,Monday,14:30,19:00,04:30,New York,41.30%,57.14%,55.41%,0.0,CE,bearish,True,be_stop,0.0,2.0,,54.17%,2023
+Mar 6 2023,Monday,12:15,13:00,00:45,New York,54.35%,43.24%,41.94%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,41.94%,2023
+Mar 14 2023,Tuesday,07:30,08:00,00:30,London,35.00%,32.50%,28.75%,-1.0,LC-1,bearish,True,sl,-1.0,2.0,,28.75%,2023
+Mar 27 2023,Monday,12:45,14:00,01:15,New York,41.94%,38.46%,36.25%,-1.0,LC-1,bearish,True,sl,-1.0,2.0,,34.62%,2023
+Apr 6 2023,Thursday,09:15,12:00,02:45,London,28.26%,43.75%,37.50%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,37.50%,2023
+Apr 26 2023,Wednesday,11:15,02:00,38:45,London,25.00%,35.29%,30.00%,2.5,CE,bullish,True,tp,9.146,2.0,,32.35%,2023
+Jul 13 2023,Thursday,08:00,09:00,01:00,London,41.30%,47.06%,45.45%,-1.0,CE,bearish,True,sl,-1.0,2.0,,45.45%,2023
+Jul 13 2023,Thursday,14:15,15:00,00:45,New York,25.00%,28.41%,26.83%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,25.00%,2023
+Jul 25 2023,Tuesday,07:45,08:00,00:15,London,25.00%,35.71%,21.88%,0.0,LC-2A,bearish,True,be_stop,0.0,2.0,,21.88%,2023
+Sep 21 2023,Thursday,08:00,09:00,01:00,London,44.44%,51.35%,48.68%,2.5,LC-2A,bearish,True,tp,7.5,2.0,,44.74%,2023
+Sep 27 2023,Wednesday,07:30,09:00,01:30,London,47.83%,59.46%,59.46%,-1.0,LC-2A,bearish,True,sl,-1.0,2.0,,59.46%,2023
+Oct 16 2023,Monday,09:15,11:00,01:45,London,31.25%,32.14%,23.08%,0.0,LC-2A,bearish,True,be_stop,0.0,2.0,,23.08%,2023
+Nov 9 2023,Thursday,13:30,18:00,04:30,New York,45.00%,51.16%,50.00%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,50.00%,2023
+Nov 30 2023,Thursday,08:30,14:00,05:30,London,28.26%,46.15%,32.50%,-1.0,LC-2B,bearish,True,sl,-1.0,2.0,,32.50%,2023
+Dec 26 2023,Tuesday,07:15,08:00,00:45,London,60.87%,54.55%,45.45%,-1.0,CE,bearish,True,sl,-1.0,2.0,,45.45%,2023
+Jan 8 2024,Monday,13:30,01:00,11:30,New York,28.00%,44.19%,48.94%,0.0,CE,bullish,True,be_stop,0.0,2.0,,44.19%,2024
+Feb 28 2024,Wednesday,07:45,08:00,00:15,London,28.26%,30.49%,33.33%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,33.33%,2024
+Mar 15 2024,Friday,07:15,08:00,00:45,London,25.00%,38.78%,33.33%,2.5,LC-2A,bullish,True,tp,3.5583,2.0,,21.25%,2024
+May 7 2024,Tuesday,09:15,13:00,03:45,London,40.00%,42.65%,45.83%,2.5,LC-2A,bullish,True,tp,0.0,2.0,,42.65%,2024
+May 28 2024,Tuesday,13:30,19:00,05:30,New York,28.00%,36.36%,29.69%,0.0,LC-1,bullish,True,be_stop,0.0,2.0,,27.42%,2024
+Jun 13 2024,Thursday,13:30,15:00,01:30,New York,28.26%,32.26%,37.10%,-1.0,LC-2A,bullish,True,sl,-1.0,2.0,,37.10%,2024
+Jun 21 2024,Friday,14:15,15:00,00:45,New York,42.31%,41.67%,36.84%,-1.0,LC-1,bearish,True,sl,-1.0,2.0,,36.84%,2024
+Jun 28 2024,Friday,08:15,10:00,01:45,London,28.26%,32.26%,34.38%,-1.0,CE,bullish,True,sl,-1.0,2.0,,34.38%,2024
+Jul 15 2024,Monday,15:00,17:00,02:00,New York,30.77%,39.19%,31.43%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,35.23%,2024
+Aug 2 2024,Friday,13:45,19:00,05:15,New York,47.83%,30.36%,32.76%,0.7045,CE,bearish,True,friday_close,0.7045,2.0,,30.36%,2024
+Sep 9 2024,Monday,08:00,10:00,02:00,London,55.56%,61.54%,59.76%,-1.0,CE,bearish,True,sl,-1.0,2.0,,59.76%,2024
+Oct 1 2024,Tuesday,14:15,15:00,00:45,New York,28.00%,30.49%,13.64%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,25.00%,2024
+Nov 15 2024,Friday,12:15,13:00,00:45,New York,27.78%,31.08%,22.73%,2.5,LC-2A,bearish,True,tp,13.6733,2.0,,20.59%,2024
+Dec 3 2024,Tuesday,09:15,11:00,01:45,London,27.78%,25.00%,25.00%,2.5,LC-2A,bearish,True,tp,0.0,2.0,,25.00%,2024
+Dec 23 2024,Monday,09:30,10:00,00:30,London,28.26%,36.36%,42.65%,-1.0,CE,bullish,True,sl,-1.0,2.0,,42.65%,2024

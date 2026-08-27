@@ -2,3 +2,4 @@ pandas
 dukascopy-python
 pyarrow
 pytest
+requests

@@ -365,10 +365,56 @@ def _intrabar_favourable_credit(ctx, k, sign, entry_price, stop, r_distance):
     return credit, True
 
 
+def _live_probability(ctx, k, direction, mitigation_factor_results, weights,
+                      entry_zone, entry_setup,
+                      target_max_distance, weekly_target_max_distance):
+    """The trade's probability re-asked at bar k.
+
+    Extracted from step 3 of the walk so the same scoring can be reached
+    from two places with no risk of them drifting apart: the per-bar
+    breakeven recheck, and the single end-of-trade score the research
+    harness journals as `final_probability`.
+
+    The Mitigation OB answers stay exactly as frozen at entry. Everything
+    that can change while the trade is open is re-evaluated off this bar:
+    the Always (structure/zone) factors, the Target OB gate, the liquidity
+    target gate, and the M15 target gate. A target price has covered
+    simply drops out, so the score falls back toward what the remaining,
+    still-untaken liquidity supports.
+    """
+    live_factors = dict(mitigation_factor_results)
+    live_factors.update(evaluate_always_factors(ctx.df.iloc[k], direction))
+    live_factors.update(
+        evaluate_ob_target_factors(
+            ctx.obs, k, direction, target_max_distance,
+            float(ctx.high[k]), float(ctx.low[k]),
+        )
+    )
+    live_factors.update(
+        evaluate_liquidity_target_factors(
+            getattr(ctx, "liq", None), k, direction,
+            float(ctx.high[k]), float(ctx.low[k]),
+            target_max_distance, weekly_target_max_distance,
+        )
+    )
+    bundle = getattr(ctx, "m15_bundle", None)
+    if bundle is not None and entry_setup is not None:
+        m15_bar = m15_index_at_or_after(bundle, ctx.ts[k])
+        if m15_bar >= 0:
+            live_factors.update(
+                evaluate_entry_target_factors(
+                    bundle, entry_zone, entry_setup, m15_bar
+                )
+            )
+    return compute_probability(live_factors, weights)
+
+
 def simulate_trade(
     ctx, idx, direction, entry_price, sl, r_distance, tp_levels=None,
     weights=None, threshold=None, mitigation_factor_results=None,
     entry_zone=None, entry_setup=None,
+    max_r_ceiling=MAX_R_CEILING, record_final_probability=False,
+    record_min_probability=False,
 ):
     """Walks forward from the bar AFTER idx under the user's real trade
     management, with no take-profit (see the module docstring).
@@ -393,7 +439,9 @@ def simulate_trade(
          breakeven, and skipped whenever `weights`, `threshold`,
          `mitigation_factor_results`, or `ctx.obs` is None, which keeps
          every caller that omits them (including every existing test)
-         running exactly as before.
+         running exactly as before. A run with the inputs but NO
+         threshold still scores each bar and reports the lowest score
+         seen, it just never acts on it.
       4. FAVOURABLE. Update the running max R and any TP touches,
          provisionally.
       5. STOP. Active stop touched -> EXIT_SL (-1.0R) before breakeven,
@@ -432,8 +480,20 @@ def simulate_trade(
       R is the honest reading.
 
     tp_levels is an optional iterable of R multiples to timestamp on the
-    way past; it never affects the walk, it only records when each level
+    way past. It never affects the walk, it only records when each level
     was first touched.
+
+    max_r_ceiling clamps the reported max R (a reporting clamp only, never
+    a loop break). It is a parameter rather than a constant because a
+    liquidity-target take-profit can legitimately sit beyond the 10R
+    default, and clipping it there would silently understate that TP
+    family's results.
+
+    record_final_probability adds one extra scoring call at the terminal
+    bar. record_min_probability adds one per bar, and is the only one of
+    the two that is genuinely expensive. Both are off by default because
+    only the research harness wants them, and every caller that omits them
+    pays nothing.
     """
     n = len(ctx.ts)
     sign = -1.0 if direction == "bearish" else 1.0
@@ -456,15 +516,36 @@ def simulate_trade(
     be_trigger = None
     be_probability = None
     max_r = 0.0
+    max_r_to_be = None
+    min_live_probability = None
+    final_probability = None
     checkpoints = 0
     tp_touches = {}
 
-    live_recheck_enabled = (
+    # Two separate questions, deliberately not one flag.
+    #
+    #   can_score_live  do we have the inputs to compute a live score at
+    #                   all? Needs weights, the frozen mitigation answers,
+    #                   and the OB universe.
+    #   recheck_enabled that, PLUS a threshold to compare against, so the
+    #                   breakeven rule has a bar to fail.
+    #
+    # They came apart because the research harness runs with no threshold
+    # (every candidate is taken, so there is nothing for the rule to act
+    # on) but still wants the score reported. Fusing them, as the single
+    # `live_recheck_enabled` flag used to, made "report the score" and
+    # "act on the score" impossible to separate.
+    can_score_live = (
         weights is not None
-        and threshold is not None
         and mitigation_factor_results is not None
         and getattr(ctx, "obs", None) is not None
     )
+    recheck_enabled = can_score_live and threshold is not None
+    # Scoring every bar costs a full factor evaluation per bar, so it is
+    # done only when someone will read the result: either the rule is
+    # armed, or the caller explicitly asked for the diagnostic. The
+    # buffer sweep runs with both off and pays nothing.
+    score_each_bar = can_score_live and (recheck_enabled or record_min_probability)
     target_max_distance = TARGET_SEARCH_R * r_distance
     weekly_target_max_distance = WEEKLY_TARGET_SEARCH_R * r_distance
 
@@ -502,6 +583,12 @@ def simulate_trade(
                     be_moved = True
                     be_idx = k
                     be_trigger = "19h_checkpoint"
+                    # Highest R reached strictly BEFORE the stop moved.
+                    # This site and the recheck below both sit ahead of
+                    # step 4, so max_r still excludes this bar -- the same
+                    # "strictly before the event" reading max_r_reached
+                    # uses for the terminal bar.
+                    max_r_to_be = max_r
             else:
                 terminal_r = r_at_open
                 terminal_reason = EXIT_CUT_19H
@@ -520,47 +607,29 @@ def simulate_trade(
                 next_checkpoint = _naive_utc(checkpoint)
 
         # --- 3. LIVE PROBABILITY CHECK -----------------------------------
-        if live_recheck_enabled and not be_moved:
-            live_factors = dict(mitigation_factor_results)
-            live_factors.update(evaluate_always_factors(ctx.df.iloc[k], direction))
-            live_factors.update(
-                evaluate_ob_target_factors(
-                    ctx.obs, k, direction, target_max_distance,
-                    float(ctx.high[k]), float(ctx.low[k]),
-                )
+        if score_each_bar and not be_moved:
+            live_probability = _live_probability(
+                ctx, k, direction, mitigation_factor_results, weights,
+                entry_zone, entry_setup,
+                target_max_distance, weekly_target_max_distance,
             )
-            # Re-asked every bar for the same reason as the OB target, and
-            # with the opposite consequence: a liquidity target price has
-            # covered simply drops out, so the score falls back toward what
-            # the remaining, still-untaken liquidity supports.
-            live_factors.update(
-                evaluate_liquidity_target_factors(
-                    getattr(ctx, "liq", None), k, direction,
-                    float(ctx.high[k]), float(ctx.low[k]),
-                    target_max_distance, weekly_target_max_distance,
-                )
-            )
-            # And the M15 target gate, for the same reason again, one level
-            # down. The user was explicit: an LRLQ target the price reaches
-            # and takes out drops OUT of the calculation, so the score falls
-            # back toward what the remaining untaken liquidity supports.
-            # Re-asked at THIS bar's M15 position, not the trigger's.
-            bundle = getattr(ctx, "m15_bundle", None)
-            if bundle is not None and entry_setup is not None:
-                m15_bar = m15_index_at_or_after(bundle, ctx.ts[k])
-                if m15_bar >= 0:
-                    live_factors.update(
-                        evaluate_entry_target_factors(
-                            bundle, entry_zone, entry_setup, m15_bar
-                        )
-                    )
-            live_probability = compute_probability(live_factors, weights)
-            if live_probability < threshold:
+            # Tracked even when the rule is not armed, so an unfiltered run
+            # can still answer "how low did this trade's score ever get?",
+            # which is what the rule would have acted on had there been a
+            # threshold to act against. The `not be_moved` guard makes this
+            # the lowest score seen WHILE THE TRADE WAS STILL AT RISK,
+            # which is exactly the window the rule operates in.
+            if min_live_probability is None:
+                min_live_probability = live_probability
+            else:
+                min_live_probability = min(min_live_probability, live_probability)
+            if recheck_enabled and live_probability < threshold:
                 stop = entry_price
                 be_moved = True
                 be_idx = k
                 be_trigger = "target_ob_probability"
                 be_probability = live_probability
+                max_r_to_be = max_r
 
         # --- 4. FAVOURABLE (provisional) --------------------------------
         max_r_before_bar = max_r
@@ -615,6 +684,19 @@ def simulate_trade(
             terminal_r = sign * (ctx.close[last] - entry_price) / r_distance
         terminal_reason = EXIT_DATA_END
 
+    # The trade's score at the moment it closed, computed ONCE here rather
+    # than every bar. The per-bar recheck above stops the instant a trade
+    # goes to breakeven, so it cannot answer this on its own, and removing
+    # that short-circuit would multiply the factor evaluations per trade by
+    # the number of bars held. Scoring the terminal bar alone is O(1) and
+    # gives exactly the number the journal wants.
+    if record_final_probability and can_score_live and terminal_idx is not None:
+        final_probability = _live_probability(
+            ctx, terminal_idx, direction, mitigation_factor_results, weights,
+            entry_zone, entry_setup,
+            target_max_distance, weekly_target_max_distance,
+        )
+
     return {
         "terminal_r": float(terminal_r),
         "terminal_reason": terminal_reason,
@@ -629,12 +711,22 @@ def simulate_trade(
         ),
         # Max favourable R strictly BEFORE the terminal event. Clamped at
         # return only -- never used as a loop break.
-        "max_r_reached": float(min(max_r, MAX_R_CEILING)),
+        "max_r_reached": float(min(max_r, max_r_ceiling)),
         "tp_touches": tp_touches,
         "be_moved": be_moved,
         "be_idx": be_idx,
         "be_trigger": be_trigger,
         "be_probability": be_probability,
+        # Highest R the trade showed before its stop moved to entry.
+        # None means it never went to breakeven, which is a different
+        # statement from 0.0 (went to breakeven having shown nothing).
+        "max_r_to_be": (
+            float(min(max_r_to_be, max_r_ceiling))
+            if max_r_to_be is not None
+            else None
+        ),
+        "min_live_probability": min_live_probability,
+        "final_probability": final_probability,
         "checkpoints": checkpoints,
         "sl_excursion_pips": float(sl_excursion_pips),
         "intrabar_resolved": bool(intrabar_resolved),

@@ -1,4 +1,5 @@
-"""Thin wrapper around dukascopy_python for the 11 backtest instruments.
+"""Thin wrapper around dukascopy_python for the 29 backtest/research
+instruments.
 
 Dukascopy's historical feed needs no account, login, or API token: fetch()
 pulls directly from Dukascopy's public data feed. See
@@ -26,6 +27,25 @@ INSTRUMENTS = {
     "EUR_JPY": instruments.INSTRUMENT_FX_CROSSES_EUR_JPY,
     "XAU_USD": instruments.INSTRUMENT_FX_METALS_XAU_USD,
     "NAS100": instruments.INSTRUMENT_IDX_AMERICA_E_NQ_100,
+    # Liquid FX crosses, data-only for now (not wired into PIP_SIZES/PAIRS).
+    "EUR_GBP": instruments.INSTRUMENT_FX_CROSSES_EUR_GBP,
+    "EUR_CHF": instruments.INSTRUMENT_FX_CROSSES_EUR_CHF,
+    "EUR_AUD": instruments.INSTRUMENT_FX_CROSSES_EUR_AUD,
+    "EUR_CAD": instruments.INSTRUMENT_FX_CROSSES_EUR_CAD,
+    "EUR_NZD": instruments.INSTRUMENT_FX_CROSSES_EUR_NZD,
+    "GBP_CHF": instruments.INSTRUMENT_FX_CROSSES_GBP_CHF,
+    "GBP_AUD": instruments.INSTRUMENT_FX_CROSSES_GBP_AUD,
+    "GBP_CAD": instruments.INSTRUMENT_FX_CROSSES_GBP_CAD,
+    "GBP_NZD": instruments.INSTRUMENT_FX_CROSSES_GBP_NZD,
+    "AUD_JPY": instruments.INSTRUMENT_FX_CROSSES_AUD_JPY,
+    "AUD_CAD": instruments.INSTRUMENT_FX_CROSSES_AUD_CAD,
+    "AUD_CHF": instruments.INSTRUMENT_FX_CROSSES_AUD_CHF,
+    "AUD_NZD": instruments.INSTRUMENT_FX_CROSSES_AUD_NZD,
+    "NZD_JPY": instruments.INSTRUMENT_FX_CROSSES_NZD_JPY,
+    "NZD_CAD": instruments.INSTRUMENT_FX_CROSSES_NZD_CAD,
+    "NZD_CHF": instruments.INSTRUMENT_FX_CROSSES_NZD_CHF,
+    "CAD_JPY": instruments.INSTRUMENT_FX_CROSSES_CAD_JPY,
+    "CHF_JPY": instruments.INSTRUMENT_FX_CROSSES_CHF_JPY,
 }
 
 # Maps this project's own granularity keys to dukascopy_python's interval

@@ -1,0 +1,225 @@
+"""Precomputes every trade the settings explorer can ever need to show.
+
+Run:  ./.venv/bin/python scripts/build_explorer_data.py [INSTRUMENT ...]
+Out:  data/research/explorer.json
+
+Every instrument is backtested INDEPENDENTLY. Nothing about one pair's
+book, scale or settings informs another's, and the explorer keeps their
+tuning separate for the same reason.
+
+The explorer is a published Artifact: one self-contained HTML file with no
+network access. So every number it can display has to be in the file
+before it is opened. This script decides what that is.
+
+WHICH SETTINGS COST A RE-RUN, AND WHICH DO NOT
+----------------------------------------------
+Two of the four settings can be re-derived in the browser exactly, and two
+cannot. That split is the whole design.
+
+Free in the browser:
+
+  take profit    The forward walk carries no take-profit at all (see
+                 backtest/simulate.py), so apply_tp's rule reduces to "if
+                 max_r_reached >= target, the trade filled there, else the
+                 walk's own ending stands". Two stored numbers and a
+                 comparison.
+  HTF threshold  find_signals just skips a candidate scoring too low, and a
+                 skipped candidate never consumes its order block. Filtering
+                 the stored list BEFORE re-running the one-trade-per-order
+                 -block rule reproduces that exactly.
+
+Needs a re-run, so it is stored as a discrete grid:
+
+  SL buffer      Moves the stop AND the pending order price, so it changes
+                 entry prices, stop distances, which setups clear the
+                 minimum stop, and which orders ever fill.
+  trade strength Not merely a filter. It feeds the live-probability
+                 breakeven rule, which moves the stop to entry the first
+                 bar a trade's score drops below the threshold it was
+                 admitted under -- so it changes OUTCOMES, not just
+                 membership. Measured over 2015-2025: keeping that rule is
+                 worth +42.07R against +37.07R without it, which is too
+                 much to drop for convenience.
+
+Hence a 7 x 9 grid of real backtest runs per instrument, about three
+minutes each after that instrument's one-off pipeline build.
+
+WHY recheck_all
+---------------
+Each cell is run with no HTF gate, so the browser can apply any. But the
+breakeven rule is normally armed only for candidates that survived the
+one-trade-per-order-block rule, and the browser re-runs that rule after
+its own HTF filter -- which can promote a candidate this script recorded
+as untaken. Every stored trade therefore has to be walked as though it
+were taken, which is what recheck_all does.
+"""
+
+import json
+import os
+import sys
+
+sys.path.insert(0, ".")
+
+import pandas as pd
+
+from backtest.instruments import pip_size_for
+from backtest.pipeline import build_instrument_bundle
+from backtest.research import pass_runner, report
+from backtest.research.params import ALL_YEARS, SL_BUFFER_GRID
+from backtest.settings import DEFAULT_SETTINGS
+from backtest.weights import initial_weights
+
+# Every instrument the explorer carries. Each is backtested completely
+# independently: its own book of trades, its own scale, its own tuning.
+# Nothing about one pair's settings informs another's.
+INSTRUMENTS = ("EUR_USD", "GBP_JPY", "AUD_USD", "EUR_JPY", "GBP_USD",
+               "NZD_USD", "USD_CAD", "USD_CHF", "USD_JPY",
+               "EUR_GBP", "EUR_CHF", "EUR_AUD", "EUR_CAD", "EUR_NZD",
+               "GBP_CHF", "GBP_AUD", "GBP_CAD", "GBP_NZD",
+               "AUD_JPY", "AUD_CAD", "AUD_CHF", "AUD_NZD",
+               "NZD_JPY", "NZD_CAD", "NZD_CHF",
+               "CAD_JPY", "CHF_JPY")
+
+# Trade-strength presets. Starts at the floor below which a trade is not
+# tradeable at all, and stops at 65 because the scale does not reach 100
+# in practice: with every weight at 1.0 the highest observed score is
+# 66.7 on GBP_JPY and 69.1 on EUR_USD.
+TOTAL_THRESHOLD_GRID = (25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0)
+
+# Codes keep the JSON small and the browser's comparisons cheap.
+SESSIONS = ("london", "ny")
+MODELS = ("LC-1", "LC-2A", "LC-2B", "CE")
+REASONS = ("tp", "sl", "be_stop", "cut_19h", "friday_close", "data_end")
+
+OUT_PATH = os.path.join("data", "research", "explorer.json")
+
+
+def _code(value, table):
+    """Index into a lookup table, or -1 for an unknown value.
+
+    -1 rather than a raise: a new entry model or exit reason appearing
+    should show up as "unclassified" in the explorer, not abort a
+    three-minute build.
+    """
+    try:
+        return table.index(value)
+    except ValueError:
+        return -1
+
+
+def encode(candidate):
+    """One trade as a flat array.
+
+    Field ORDER is the contract with the page's decoder. Anything added
+    goes on the end, never in the middle.
+    """
+    row = candidate["row"]
+    walk = candidate["walk"]
+    start = row.get("order_placed_time")
+    end = row.get("order_completed_time")
+
+    return [
+        candidate["ob_row"],                                    # 0
+        candidate["year"],                                      # 1
+        report.fmt_date(row.get("date")),                       # 2
+        (row.get("day_of_week") or "")[:3],                     # 3
+        report.fmt_time(start),                                 # 4
+        report.fmt_time(end),                                   # 5
+        report.fmt_duration(start, end),                        # 6
+        report.fmt_date(pd.Timestamp(end).date()) if end is not None else "",  # 7
+        _code(row.get("session"), SESSIONS),                    # 8
+        _code(candidate.get("entry_model"), MODELS),            # 9
+        1 if row.get("direction") == "bullish" else 0,          # 10
+        round(candidate["htf_probability"] or 0.0, 2),          # 11
+        round(candidate["total_probability"] or 0.0, 2),        # 12
+        round(candidate["final_probability"] or 0.0, 2)
+        if candidate.get("final_probability") is not None else None,   # 13
+        round(candidate["sl_pips"], 1),                         # 14
+        round(walk["max_r_reached"], 3),                        # 15
+        round(walk["terminal_r"], 3),                           # 16
+        _code(walk["terminal_reason"], REASONS),                # 17
+        round(candidate["max_r_to_be"], 2)
+        if candidate.get("max_r_to_be") is not None else None,  # 18
+        # Sort key for the equity curve. The account moves when a trade
+        # CLOSES, and two trades opened the same week can close a month
+        # apart, so entry order would draw a curve nobody lived through.
+        int(pd.Timestamp(end).timestamp() // 60) if end is not None else 0,  # 19
+    ]
+
+
+def build_instrument(instrument):
+    """Every cell of the grid for one instrument."""
+    pip_size = pip_size_for(instrument)
+    print("\n=== %s ===" % instrument)
+    print("  building pipeline (about two minutes, done once)...")
+    bundle = build_instrument_bundle(instrument)
+    m15_df = pd.read_parquet(
+        os.path.join("data", "raw", "%s_M15.parquet" % instrument)
+    )
+    weights = initial_weights()
+
+    cells = {}
+    for buffer_pips in SL_BUFFER_GRID:
+        counts = []
+        for threshold in TOTAL_THRESHOLD_GRID:
+            settings = dict(
+                DEFAULT_SETTINGS,
+                tp_multiple=None,
+                htf_threshold=None,       # the browser applies any HTF cut
+                total_threshold=threshold,
+            )
+            candidates = pass_runner.run_pass(
+                bundle, ALL_YEARS,
+                pip_size=pip_size, weights=weights, settings=settings,
+                m15_df=m15_df, sl_buffer_pips=buffer_pips,
+                recheck=True, recheck_all=True,
+                record_final_probability=True,
+            )
+            # Only what clears this cell's threshold. The rest belong to a
+            # looser cell and are already stored there.
+            kept = [
+                c for c in candidates
+                if (c["total_probability"] or -999) >= threshold
+            ]
+            # Entry order, because the one-trade-per-order-block rule is
+            # first-come and only means "the first one" if this holds.
+            kept.sort(key=lambda c: c["row"]["order_placed_time"])
+            cells["%g|%g" % (buffer_pips, threshold)] = [encode(c) for c in kept]
+            counts.append(len(kept))
+        print("  buffer %.1f pips: %s"
+              % (buffer_pips, " ".join("%d" % n for n in counts)))
+
+    return {
+        "years": list(ALL_YEARS),
+        "buffers": list(SL_BUFFER_GRID),
+        "thresholds": list(TOTAL_THRESHOLD_GRID),
+        "cells": cells,
+    }
+
+
+def main():
+    instruments = sys.argv[1:] or list(INSTRUMENTS)
+    print("thresholds: %s" % ", ".join("%g" % t for t in TOTAL_THRESHOLD_GRID))
+
+    payload = {
+        "instruments": {},
+        "sessions": list(SESSIONS),
+        "models": list(MODELS),
+        "reasons": list(REASONS),
+    }
+    for instrument in instruments:
+        payload["instruments"][instrument] = build_instrument(instrument)
+
+    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+    with open(OUT_PATH, "w") as f:
+        json.dump(payload, f, separators=(",", ":"))
+
+    total = sum(len(v) for inst in payload["instruments"].values()
+                for v in inst["cells"].values())
+    print("\nwrote %s  (%d instruments, %d trade rows, %.1f MB)"
+          % (OUT_PATH, len(payload["instruments"]), total,
+             os.path.getsize(OUT_PATH) / 1048576))
+
+
+if __name__ == "__main__":
+    main()

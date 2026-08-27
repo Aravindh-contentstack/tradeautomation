@@ -49,6 +49,8 @@ sys.path.insert(0, ".")
 from backtest.instruments import pip_size_for
 from backtest.killzone import next_london_cutoff
 from backtest.pipeline import build_live_context
+from backtest import entry_params
+from backtest.entry_ob import SL_BUFFER_PIPS
 from backtest.settings import is_taken, load_settings
 from backtest.simulate import find_signals, tp_price_for
 from backtest.weights import load_weights
@@ -249,11 +251,21 @@ def run_once(state, settings, weights):
         return state
     safety.mark_candle_processed(state, latest_candle_time)
 
-    signals = find_signals(
-        ctx, weights, PIP_SIZE,
-        htf_threshold=settings.get("htf_threshold"),
-        pending_as_of=as_of,
-    )
+    # The stop buffer is per instrument and lives in the settings file, so
+    # it has to be in force while the setups are BUILT, not applied after.
+    # It moves the stop and, on the two LC models, the pending order price
+    # too, so it decides the order price, the stop distance, whether the
+    # setup clears the minimum stop size, and therefore whether the setup
+    # exists at all. Applying it any later would place orders at prices
+    # the tuning never tested.
+    with entry_params.override(
+        sl_buffer_pips=settings.get("sl_buffer_pips", SL_BUFFER_PIPS)
+    ):
+        signals = find_signals(
+            ctx, weights, PIP_SIZE,
+            htf_threshold=settings.get("htf_threshold"),
+            pending_as_of=as_of,
+        )
     state = reconcile_pending_orders(state, signals, settings, balance)
     return state
 

@@ -93,8 +93,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from backtest import killzone
-from backtest.entry_ob import MIN_R_PIPS, SL_BUFFER_PIPS
+from backtest import entry_params, killzone
 from backtest.m15_pipeline import h1_bar_containing, m15_index_at_or_after
 
 # How near the zone LC-1's liquidity has to sit, in multiples of M15
@@ -652,7 +651,7 @@ def _pending_ce(bundle, h1_ts, zone, break_bar, extreme, extreme_bar, broken,
     returns None so the caller cancels.
     """
     n = len(bundle.ts)
-    buffer_price = SL_BUFFER_PIPS * pip_size
+    buffer_price = entry_params.sl_buffer_pips() * pip_size
     sign = zone.sign
 
     running = bundle.high[break_bar] if zone.bullish else bundle.low[break_bar]
@@ -688,7 +687,7 @@ def _pending_ce(bundle, h1_ts, zone, break_bar, extreme, extreme_bar, broken,
     limit_price = extreme + sign * CE_FIB * height
     sl = extreme - sign * buffer_price
     r_distance = abs(limit_price - sl)
-    if r_distance < MIN_R_PIPS * pip_size:
+    if r_distance < entry_params.min_r_pips() * pip_size:
         return None
 
     return {
@@ -734,7 +733,7 @@ def _resolve_ce(bundle, h1_ts, zone, break_bar, extreme, extreme_bar,
        counter alone would follow forever.
     """
     n = len(bundle.ts)
-    buffer_price = SL_BUFFER_PIPS * pip_size
+    buffer_price = entry_params.sl_buffer_pips() * pip_size
     sign = zone.sign
 
     running = bundle.high[break_bar] if zone.bullish else bundle.low[break_bar]
@@ -775,7 +774,7 @@ def _resolve_ce(bundle, h1_ts, zone, break_bar, extreme, extreme_bar,
         # A limit is reached by price coming BACK to it, which is the same
         # direction as coming back to the zone, so zone.bullish is passed
         # through unchanged here.
-        if r_distance >= MIN_R_PIPS * pip_size and _reaches(
+        if r_distance >= entry_params.min_r_pips() * pip_size and _reaches(
             bundle, j, limit_price, zone.bullish
         ):
             return {
@@ -976,7 +975,7 @@ def _pending_order(bundle, zone, setup, pip_size, eq_breach, as_of):
     """
     a = setup["trigger_m15"]
     n = len(bundle.ts)
-    buffer_price = SL_BUFFER_PIPS * pip_size
+    buffer_price = entry_params.sl_buffer_pips() * pip_size
 
     # Advance the host first, then judge liveness. The other order would
     # report the stale price on the very bar the order re-hosts.
@@ -996,7 +995,7 @@ def _pending_order(bundle, zone, setup, pip_size, eq_breach, as_of):
 
     order_price, sl = _order_prices(bundle, host, zone, buffer_price)
     r_distance = abs(order_price - sl)
-    if r_distance < MIN_R_PIPS * pip_size:
+    if r_distance < entry_params.min_r_pips() * pip_size:
         return None
 
     return {
@@ -1030,7 +1029,7 @@ def _resolve_order(bundle, zone, setup, pip_size, eq_breach):
     and stronger statement than "half the zone is consumed".
     """
     a = setup["trigger_m15"]
-    buffer_price = SL_BUFFER_PIPS * pip_size
+    buffer_price = entry_params.sl_buffer_pips() * pip_size
     n = len(bundle.ts)
 
     # A resting stop order is live for its host candle and the one after
@@ -1045,7 +1044,7 @@ def _resolve_order(bundle, zone, setup, pip_size, eq_breach):
         # A trigger too narrow to give a usable stop does not disqualify a
         # re-host: candle B may be wider. So this skips the fill attempt
         # rather than returning.
-        if r_distance >= MIN_R_PIPS * pip_size:
+        if r_distance >= entry_params.min_r_pips() * pip_size:
             fill = _first_fill(bundle, host, min(host + 1, n - 1),
                                order_price, zone)
             if fill is not None:

@@ -1,0 +1,182 @@
+{
+  "strike_rate / max strike_rate": {
+    "seed": "strike_rate",
+    "htf_threshold": 45.0,
+    "total_threshold": 50.0,
+    "tp_spec": {
+      "family": "sl_size",
+      "field": "sl_pips",
+      "cut": 23.699999999999477,
+      "low": 1.25,
+      "high": 1.0
+    },
+    "tp_desc": "1.25R below sl_size 23.70, 1.00R at or above",
+    "sl_buffer_pips": 6.0,
+    "train": {
+      "strike_rate": 0.8125,
+      "roi_r": 11.2186812610872,
+      "expectancy_r": 0.5342229171946286,
+      "trade_count": 21,
+      "resolved": 16,
+      "max_drawdown_r": 1.240628778718274
+    },
+    "holdout": {
+      "strike_rate": 0.6,
+      "roi_r": 1.0,
+      "expectancy_r": 0.14285714285714285,
+      "trade_count": 7,
+      "resolved": 5,
+      "max_drawdown_r": 1.0
+    }
+  },
+  "strike_rate / max roi_r": {
+    "seed": "strike_rate",
+    "htf_threshold": 30.0,
+    "total_threshold": 35.0,
+    "tp_spec": {
+      "family": "sl_size",
+      "field": "sl_pips",
+      "cut": 23.699999999999477,
+      "low": 1.25,
+      "high": 1.0
+    },
+    "tp_desc": "1.25R below sl_size 23.70, 1.00R at or above",
+    "sl_buffer_pips": 6.0,
+    "train": {
+      "strike_rate": 0.6071428571428571,
+      "roi_r": 14.2186812610872,
+      "expectancy_r": 0.2256933533505905,
+      "trade_count": 63,
+      "resolved": 56,
+      "max_drawdown_r": 3.0
+    },
+    "holdout": {
+      "strike_rate": 0.25,
+      "roi_r": -8.0,
+      "expectancy_r": -0.38095238095238093,
+      "trade_count": 21,
+      "resolved": 16,
+      "max_drawdown_r": 10.0
+    }
+  },
+  "strike_rate / max expectancy_r": {
+    "seed": "strike_rate",
+    "htf_threshold": 45.0,
+    "total_threshold": 50.0,
+    "tp_spec": {
+      "family": "sl_size",
+      "field": "sl_pips",
+      "cut": 23.699999999999477,
+      "low": 1.25,
+      "high": 1.0
+    },
+    "tp_desc": "1.25R below sl_size 23.70, 1.00R at or above",
+    "sl_buffer_pips": 6.0,
+    "train": {
+      "strike_rate": 0.8125,
+      "roi_r": 11.2186812610872,
+      "expectancy_r": 0.5342229171946286,
+      "trade_count": 21,
+      "resolved": 16,
+      "max_drawdown_r": 1.240628778718274
+    },
+    "holdout": {
+      "strike_rate": 0.6,
+      "roi_r": 1.0,
+      "expectancy_r": 0.14285714285714285,
+      "trade_count": 7,
+      "resolved": 5,
+      "max_drawdown_r": 1.0
+    }
+  },
+  "expectancy_r / max strike_rate": {
+    "seed": "expectancy_r",
+    "htf_threshold": 35.0,
+    "total_threshold": 40.0,
+    "tp_spec": {
+      "family": "sl_size",
+      "field": "sl_pips",
+      "cut": 34.15000000000248,
+      "low": 10.0,
+      "high": 5.25
+    },
+    "tp_desc": "10.00R below sl_size 34.15, 5.25R at or above",
+    "sl_buffer_pips": 8.0,
+    "train": {
+      "strike_rate": 0.5,
+      "roi_r": 11.526583048514578,
+      "expectancy_r": 1.4408228810643222,
+      "trade_count": 8,
+      "resolved": 2,
+      "max_drawdown_r": 1.1753986332573905
+    },
+    "holdout": {
+      "strike_rate": 0.0,
+      "roi_r": -2.0,
+      "expectancy_r": -0.4,
+      "trade_count": 5,
+      "resolved": 2,
+      "max_drawdown_r": 2.0
+    }
+  },
+  "expectancy_r / max roi_r": {
+    "seed": "expectancy_r",
+    "htf_threshold": 25.0,
+    "total_threshold": 25.0,
+    "tp_spec": {
+      "family": "sl_size",
+      "field": "sl_pips",
+      "cut": 34.15000000000248,
+      "low": 10.0,
+      "high": 5.25
+    },
+    "tp_desc": "10.00R below sl_size 34.15, 5.25R at or above",
+    "sl_buffer_pips": 8.0,
+    "train": {
+      "strike_rate": 0.21052631578947367,
+      "roi_r": 35.962286813650586,
+      "expectancy_r": 1.0274939089614452,
+      "trade_count": 35,
+      "resolved": 19,
+      "max_drawdown_r": 5.0
+    },
+    "holdout": {
+      "strike_rate": 0.0,
+      "roi_r": -2.942608695652297,
+      "expectancy_r": -0.24521739130435807,
+      "trade_count": 12,
+      "resolved": 6,
+      "max_drawdown_r": 5.0
+    }
+  },
+  "expectancy_r / max expectancy_r": {
+    "seed": "expectancy_r",
+    "htf_threshold": 35.0,
+    "total_threshold": 40.0,
+    "tp_spec": {
+      "family": "sl_size",
+      "field": "sl_pips",
+      "cut": 34.15000000000248,
+      "low": 10.0,
+      "high": 5.25
+    },
+    "tp_desc": "10.00R below sl_size 34.15, 5.25R at or above",
+    "sl_buffer_pips": 8.0,
+    "train": {
+      "strike_rate": 0.5,
+      "roi_r": 11.526583048514578,
+      "expectancy_r": 1.4408228810643222,
+      "trade_count": 8,
+      "resolved": 2,
+      "max_drawdown_r": 1.1753986332573905
+    },
+    "holdout": {
+      "strike_rate": 0.0,
+      "roi_r": -2.0,
+      "expectancy_r": -0.4,
+      "trade_count": 5,
+      "resolved": 2,
+      "max_drawdown_r": 2.0
+    }
+  }
+}

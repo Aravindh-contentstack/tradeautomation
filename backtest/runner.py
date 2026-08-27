@@ -96,6 +96,61 @@ def _window(frame, start, end):
     return sliced.reset_index(drop=True)
 
 
+def build_year_context(df, year, *, pip_size, m15_df=None, m15_bundle=None,
+                       obs=None, liq=None, walk_tail=DEFAULT_WALK_TAIL):
+    """The MarketContext one calendar year is walked in, plus the year end.
+
+    Split out of run_year so the research harness (backtest/research/) can
+    build the identical context without inheriting run_year's other
+    commitments: one TP multiple, weight learning on every candidate, and
+    the recheck-only-if-taken rule. Those are right for the walk-forward
+    engine and wrong for a tuning sweep, but the CONTEXT has to be
+    byte-identical between the two or nothing measured in research
+    transfers back.
+
+    Returns (ctx, year_end) or (None, year_end) when the year holds no
+    bars. year_end is returned because callers need it to drop the walk
+    tail's own signals, which is a decision run_year makes and the
+    research runner has to make the same way.
+    """
+    start, end = _year_bounds(year)
+    tail = walk_tail if walk_tail is not None else pd.Timedelta(0)
+
+    # The walk frame runs past year-end; the SIGNAL frame does not.
+    walk_df = _window(df, start, end + tail)
+    if walk_df is None:
+        return None, end
+
+    # The window's offset into full history comes from the explicit
+    # h1_index column, never from re-deriving a position by timestamp:
+    # walk_df has already been reset_index'ed and its own index says
+    # nothing about where it sits in the instrument's history.
+    window_obs = None
+    window_liq = None
+    if "h1_index" in walk_df.columns:
+        window_start = int(walk_df["h1_index"].iloc[0])
+        window_stop = window_start + len(walk_df)
+        if obs is not None:
+            window_obs = slice_universe(obs, window_start, window_stop)
+        if liq is not None:
+            window_liq = slice_liquidity(liq, window_start, window_stop)
+
+    ctx = build_market_context(
+        walk_df,
+        pip_size,
+        m15_df=_window(m15_df, start, end + tail),
+        obs=window_obs,
+        liq=window_liq,
+        # Passed through WHOLE, unlike obs/liq/m15_df above, all three of
+        # which are cut to the walk window. The bundle is indexed on its own
+        # full M15 history and the entry models cross into it by timestamp,
+        # so windowing it here would blind LC-1 to every level formed just
+        # across a year boundary. See backtest/m15_pipeline.py.
+        m15_bundle=m15_bundle,
+    )
+    return ctx, end
+
+
 def run_year(df, year, *, pip_size, frozen_weights, settings,
              m15_df=None, m15_bundle=None, tp_levels=None,
              walk_tail=DEFAULT_WALK_TAIL,
@@ -128,41 +183,12 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
     """
     learning_weights = dict(frozen_weights)
 
-    start, end = _year_bounds(year)
-    tail = walk_tail if walk_tail is not None else pd.Timedelta(0)
-
-    # The walk frame runs past year-end; the SIGNAL frame does not.
-    walk_df = _window(df, start, end + tail)
-    if walk_df is None:
-        return learning_weights, []
-
-    # The window's offset into full history comes from the explicit
-    # h1_index column, never from re-deriving a position by timestamp:
-    # walk_df has already been reset_index'ed and its own index says
-    # nothing about where it sits in the instrument's history.
-    window_obs = None
-    window_liq = None
-    if "h1_index" in walk_df.columns:
-        window_start = int(walk_df["h1_index"].iloc[0])
-        window_stop = window_start + len(walk_df)
-        if obs is not None:
-            window_obs = slice_universe(obs, window_start, window_stop)
-        if liq is not None:
-            window_liq = slice_liquidity(liq, window_start, window_stop)
-
-    ctx = build_market_context(
-        walk_df,
-        pip_size,
-        m15_df=_window(m15_df, start, end + tail),
-        obs=window_obs,
-        liq=window_liq,
-        # Passed through WHOLE, unlike obs/liq/m15_df above, all three of
-        # which are cut to the walk window. The bundle is indexed on its own
-        # full M15 history and the entry models cross into it by timestamp,
-        # so windowing it here would blind LC-1 to every level formed just
-        # across a year boundary. See backtest/m15_pipeline.py.
-        m15_bundle=m15_bundle,
+    ctx, end = build_year_context(
+        df, year, pip_size=pip_size, m15_df=m15_df, m15_bundle=m15_bundle,
+        obs=obs, liq=liq, walk_tail=walk_tail,
     )
+    if ctx is None:
+        return learning_weights, []
 
     # find_signals runs over the whole walk frame and the tail's signals are
     # dropped afterwards, rather than the frame being pre-trimmed, because a

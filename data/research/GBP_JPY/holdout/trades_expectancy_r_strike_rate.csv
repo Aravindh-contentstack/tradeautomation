@@ -1,0 +1,6 @@
+date,day,start_time,end_time,duration,session,htf_strength,trade_strength,final_probability,trade_outcome_r,entry_model,direction,taken,exit_reason,terminal_r,sl_buffer_pips,tp_multiple,min_live_probability,year
+Mar 6 2023,Monday,12:15,13:00,00:45,New York,51.01%,41.29%,41.29%,-1.0,LC-2A,bullish,True,sl,-1.0,8.0,,41.29%,2023
+Dec 26 2023,Tuesday,07:15,09:00,01:45,London,45.65%,47.19%,35.01%,0.0,CE,bearish,True,be_stop,0.0,8.0,,35.01%,2023
+May 7 2024,Tuesday,09:15,22:00,12:45,London,37.81%,42.69%,43.00%,0.0,LC-2A,bullish,True,be_stop,0.0,8.0,,44.19%,2024
+Sep 9 2024,Monday,08:00,10:00,02:00,London,40.43%,47.52%,44.75%,-1.0,CE,bearish,True,sl,-1.0,8.0,,44.75%,2024
+Mar 26 2025,Wednesday,09:30,21:00,11:30,London,36.83%,43.77%,50.29%,0.0,LC-2A,bullish,True,be_stop,0.0,8.0,,42.93%,2025

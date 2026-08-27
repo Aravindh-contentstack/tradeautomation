@@ -1,0 +1,32 @@
+{
+  "applied": {
+    "sl_buffer_pips": 0.5,
+    "total_threshold": 55.0,
+    "threshold": 55.0,
+    "htf_threshold": 55.0,
+    "tp_multiple": 3.25,
+    "max_sl_size_pips": null
+  },
+  "recommended": {
+    "sl_buffer_pips": 0.5,
+    "total_threshold": 55.0,
+    "threshold": 55.0,
+    "htf_threshold": 55.0,
+    "tp_multiple": 3.25,
+    "max_sl_size_pips": null
+  },
+  "candidate_count": null,
+  "taken_count": 6,
+  "source": "manual",
+  "note": "Chosen by hand by the user in the settings explorer on 2026-08-26, not by the automated search. Factor weights are all 1.0 (no learning). Stats are over 2015-2025, in-sample by construction since the settings were picked while looking at that period. Written as a 2026 file so the live runner, which reads the newest year, picks these up while the 2020-2025 walk-forward history stays intact.",
+  "backtest_2015_2025": {
+    "trades": 6,
+    "tp_hits": 3,
+    "sl_hits": 2,
+    "other": 1,
+    "strike_rate": 0.6,
+    "total_r": 7.87,
+    "r_per_trade": 1.311,
+    "max_drawdown_r": 1.0
+  }
+}
