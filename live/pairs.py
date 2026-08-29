@@ -13,7 +13,6 @@ PAIRS = [
     "USD_CAD",
     "USD_CHF",
     "USD_JPY",
-    "XAU_USD",
     # Appended 2026-08-29 with the portfolio-wide settings rollout
     # (per-pair-trade-setttings.csv). Always append here, never insert
     # above: magic_for derives each pair's MT5 magic number from its
