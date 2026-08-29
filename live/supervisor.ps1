@@ -21,7 +21,11 @@ New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 # Mirrors live/pairs.py's PAIRS list. Keep these in sync if a pair is
 # added or removed there.
 $Pairs = @("AUD_USD", "EUR_JPY", "EUR_USD", "GBP_JPY", "GBP_USD",
-           "NZD_USD", "USD_CAD", "USD_CHF", "USD_JPY", "XAU_USD")
+           "NZD_USD", "USD_CAD", "USD_CHF", "USD_JPY", "XAU_USD",
+           "EUR_GBP", "EUR_CHF", "EUR_AUD", "EUR_CAD", "EUR_NZD",
+           "GBP_CHF", "GBP_AUD", "GBP_CAD", "GBP_NZD", "AUD_JPY",
+           "AUD_CAD", "AUD_CHF", "AUD_NZD", "NZD_JPY", "NZD_CAD",
+           "NZD_CHF", "CAD_JPY", "CHF_JPY")
 
 function Start-Bot {
     param([string]$Instrument)

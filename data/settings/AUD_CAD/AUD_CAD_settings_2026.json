@@ -1,42 +1,40 @@
 {
   "applied": {
-    "htf_threshold": 56.0,
-    "total_threshold": 50.0,
-    "threshold": 50.0,
-    "tp_multiple": 2.75,
+    "htf_threshold": 55.0,
+    "total_threshold": 60.0,
+    "threshold": 60.0,
+    "tp_multiple": 3.25,
     "max_sl_size_pips": null,
-    "sl_buffer_pips": 1.0,
+    "sl_buffer_pips": 2.0,
     "allowed_sessions": [
-      "london",
-      "ny"
+      "london"
     ],
     "restricted_entry_models": null
   },
   "recommended": {
-    "htf_threshold": 56.0,
-    "total_threshold": 50.0,
-    "threshold": 50.0,
-    "tp_multiple": 2.75,
+    "htf_threshold": 55.0,
+    "total_threshold": 60.0,
+    "threshold": 60.0,
+    "tp_multiple": 3.25,
     "max_sl_size_pips": null,
-    "sl_buffer_pips": 1.0,
+    "sl_buffer_pips": 2.0,
     "allowed_sessions": [
-      "london",
-      "ny"
+      "london"
     ],
     "restricted_entry_models": null
   },
-  "candidate_count": 15,
-  "taken_count": 10,
+  "candidate_count": 10,
+  "taken_count": 3,
   "source": "manual",
   "note": "Chosen by hand by the user in a review of backtest data across all 27 pairs on 2026-08-29 (per-pair-trade-setttings.csv), aiming for a combined strike rate above 60% and max drawdown of 4.1%. Factor weights are all 1.0 (no learning). Stats are over 2015-2025, in-sample by construction since the settings were picked while looking at that period. Written as a 2026 file so the live runner, which reads the newest year, picks these up. The CSV's last row (\"CAD CHF\") does not exist anywhere in this repo; confirmed with the user it meant CHF_JPY, which is what this file is for. Produced by scripts/apply_pair_settings.py.",
   "backtest_2015_2025": {
-    "trades": 10,
-    "tp_hits": 5,
-    "sl_hits": 2,
-    "other": 3,
-    "strike_rate": 0.7142857142857143,
-    "total_r": 11.86,
-    "r_per_trade": 1.186,
-    "max_drawdown_r": 1.89
+    "trades": 3,
+    "tp_hits": 1,
+    "sl_hits": 1,
+    "other": 1,
+    "strike_rate": 0.5,
+    "total_r": 2.25,
+    "r_per_trade": 0.75,
+    "max_drawdown_r": 1.0
   }
 }

@@ -14,6 +14,29 @@ PAIRS = [
     "USD_CHF",
     "USD_JPY",
     "XAU_USD",
+    # Appended 2026-08-29 with the portfolio-wide settings rollout
+    # (per-pair-trade-setttings.csv). Always append here, never insert
+    # above: magic_for derives each pair's MT5 magic number from its
+    # index in this list, and reordering would reassign a currently-live
+    # pair's magic number and orphan its open MT5 positions.
+    "EUR_GBP",
+    "EUR_CHF",
+    "EUR_AUD",
+    "EUR_CAD",
+    "EUR_NZD",
+    "GBP_CHF",
+    "GBP_AUD",
+    "GBP_CAD",
+    "GBP_NZD",
+    "AUD_JPY",
+    "AUD_CAD",
+    "AUD_CHF",
+    "AUD_NZD",
+    "NZD_JPY",
+    "NZD_CAD",
+    "NZD_CHF",
+    "CAD_JPY",
+    "CHF_JPY",
 ]
 
 MAGIC_BASE = 20260808

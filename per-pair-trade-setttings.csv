@@ -1,0 +1,28 @@
+Pair,TP,SLB,HTF Thresh,Total Thresh,Sessions,Restricted entry models
+EUR USD,7.5,2,55,60,"London, NY",None
+GBP USD,5.25,1,57,50,"London, NY",None
+GBP JPY,2.75,1,56,50,"London, NY",None
+AUD USD,3,2,55,50,NY,None
+EUR JPY,2.25,1,53,50,London,None
+NZD USD,2,1,55,55,NY,None
+USD CAD,3,0.5,54,55,NY,None
+USD CHF,7.5,2,50,55,NY,None
+USD JPY,2.5,2,50,55,NY,None
+EUR GBP,3,2,50,65,London,None
+EUR CHF,2.5,1,50,60,"London, NY",None
+EUR AUD,2,1,50,55,NY,None
+EUR CAD,2.5,0.5,55,55,"London, NY",None
+EUR NZD,2.5,0.5,55,50,London,LC-1
+GBP CHF,2,0.5,55,55,"London, NY",LC-1
+GBP AUD,2.5,1,40,50,"London, NY",LC-2A
+GBP CAD,2.75,1,55,50,"London, NY",LC-2A
+GBP NZD,3.5,2,55,60,"London, NY",None
+AUD JPY,3.75,2,45,40,London,None
+AUD CAD,3.25,2,55,60,London,None
+AUD CHF,2.5,2,55,55,"London, NY",None
+AUD NZD,5,2,55,60,London,None
+NZD JPY,2.5,2,55,50,London,None
+NZD CAD,3.5,3,55,60,NY,None
+NZD CHF,2.5,0.5,60,50,"London, NY",None
+CAD JPY,2.75,2,50,60,"London, NY",LC-1
+CAD CHF,3.5,2,55,60,"London, NY",None
