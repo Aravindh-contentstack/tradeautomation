@@ -215,17 +215,24 @@ class Zone:
         return self.bottom if self.bullish else self.top
 
 
-def _in_killzone(bundle, j):
-    """Does M15 bar j close inside London or NY hours?
+def _in_killzone(bundle, j, allowed_sessions=None):
+    """Does M15 bar j close inside an allowed killzone?
 
     Decision 4: the H1 mitigation is no longer session-gated, but the M15
     candle that completes the setup must land in a killzone. The gate
     moved to where it now matters, which is entry.
+
+    allowed_sessions restricts which of London/NY may host a trigger, per
+    instrument. None (the default, and every caller before this parameter
+    existed) allows both, unchanged from the original behavior.
     """
     hour = int(bundle.london_hour[j])
-    return (
-        killzone.LONDON_START_HOUR <= hour < killzone.LONDON_END_HOUR
-        or killzone.NY_START_HOUR <= hour < killzone.NY_END_HOUR
+    in_london = killzone.LONDON_START_HOUR <= hour < killzone.LONDON_END_HOUR
+    in_ny = killzone.NY_START_HOUR <= hour < killzone.NY_END_HOUR
+    if allowed_sessions is None:
+        return in_london or in_ny
+    return (in_london and "london" in allowed_sessions) or (
+        in_ny and "ny" in allowed_sessions
     )
 
 
@@ -809,7 +816,8 @@ def _resolve_ce(bundle, h1_ts, zone, break_bar, extreme, extreme_bar,
     return None
 
 
-def scan_for_entry(bundle, h1_ts, zone, mitigation_bar, pip_size):
+def scan_for_entry(bundle, h1_ts, zone, mitigation_bar, pip_size,
+                    allowed_sessions=None):
     """The first entry model to FILL on this zone, or None.
 
     The backtest entry point. Answers a historical question, so it requires
@@ -818,10 +826,14 @@ def scan_for_entry(bundle, h1_ts, zone, mitigation_bar, pip_size):
 
     The live bot needs the opposite question. See pending_order_for.
     """
-    return _walk(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of=None)
+    return _walk(
+        bundle, h1_ts, zone, mitigation_bar, pip_size, as_of=None,
+        allowed_sessions=allowed_sessions,
+    )
 
 
-def pending_order_for(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of):
+def pending_order_for(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of,
+                       allowed_sessions=None):
     """The order that should be RESTING right now, or None.
 
     The live counterpart to scan_for_entry, and it exists because the two
@@ -847,10 +859,14 @@ def pending_order_for(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of):
     """
     if as_of is None or as_of < 0:
         return None
-    return _walk(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of=as_of)
+    return _walk(
+        bundle, h1_ts, zone, mitigation_bar, pip_size, as_of=as_of,
+        allowed_sessions=allowed_sessions,
+    )
 
 
-def _walk(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of):
+def _walk(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of,
+          allowed_sessions=None):
     """The one scan. as_of None means the historical walk (find the fill),
     an index means the live walk (find the order to rest at that bar).
 
@@ -860,6 +876,8 @@ def _walk(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of):
     zone: a Zone.
     mitigation_bar: the H1 bar the qualifying touch landed on.
     pip_size: the instrument's pip, for the stop buffer and MIN_R floor.
+    allowed_sessions: which killzone(s) may host a trigger for this
+        instrument. None allows both London and NY, the original behavior.
 
     Returns a dict carrying the model, the trigger bar, the order and stop
     prices, the fill, and an `evidence` sub-dict holding everything the
@@ -916,7 +934,7 @@ def _walk(bundle, h1_ts, zone, mitigation_bar, pip_size, as_of):
         if eq_breach is not None and j > eq_breach:
             return None
 
-        if not _in_killzone(bundle, j):
+        if not _in_killzone(bundle, j, allowed_sessions):
             continue
 
         for model in order:

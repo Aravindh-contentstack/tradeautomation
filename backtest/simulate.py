@@ -143,7 +143,7 @@ def _htf_factors(ctx, k, direction, ob_row):
 
 
 def find_signals(ctx, weights, pip_size, htf_threshold=None,
-                 pending_as_of=None):
+                 pending_as_of=None, allowed_sessions=None):
     """Every M15 entry model that fired on a qualifying H1 OB touch.
 
     pending_as_of switches the question from historical to live. Left None
@@ -204,10 +204,14 @@ def find_signals(ctx, weights, pip_size, htf_threshold=None,
 
         zone = zone_for(ctx, ob_row)
         if pending_as_of is None:
-            setup = scan_for_entry(bundle, ctx.ts, zone, k, pip_size)
+            setup = scan_for_entry(
+                bundle, ctx.ts, zone, k, pip_size,
+                allowed_sessions=allowed_sessions,
+            )
         else:
             setup = pending_order_for(
-                bundle, ctx.ts, zone, k, pip_size, pending_as_of
+                bundle, ctx.ts, zone, k, pip_size, pending_as_of,
+                allowed_sessions=allowed_sessions,
             )
         if setup is None:
             continue

@@ -102,6 +102,20 @@ class TestIsTaken:
         # A settings dict built by hand or by very old code.
         assert not is_taken(candidate(15.0), {"threshold": 20.0}, PIP)
 
+    def test_no_restricted_entry_models_means_no_filter(self):
+        signal = dict(candidate(25.0), entry_model="LC-1")
+        assert is_taken(signal, {"total_threshold": 20.0}, PIP)
+
+    def test_a_restricted_entry_model_is_excluded(self):
+        signal = dict(candidate(25.0), entry_model="LC-1")
+        settings = {"total_threshold": 20.0, "restricted_entry_models": ["LC-1"]}
+        assert not is_taken(signal, settings, PIP)
+
+    def test_an_unrestricted_entry_model_still_passes(self):
+        signal = dict(candidate(25.0), entry_model="LC-2A")
+        settings = {"total_threshold": 20.0, "restricted_entry_models": ["LC-1"]}
+        assert is_taken(signal, settings, PIP)
+
 
 class TestHtfGate:
     def test_it_sits_at_the_configured_low_quantile(self):

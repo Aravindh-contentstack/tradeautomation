@@ -265,6 +265,7 @@ def run_once(state, settings, weights):
             ctx, weights, PIP_SIZE,
             htf_threshold=settings.get("htf_threshold"),
             pending_as_of=as_of,
+            allowed_sessions=settings.get("allowed_sessions"),
         )
     state = reconcile_pending_orders(state, signals, settings, balance)
     return state

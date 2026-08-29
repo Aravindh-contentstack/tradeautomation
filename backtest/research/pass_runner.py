@@ -146,6 +146,7 @@ def run_pass(bundle, years, *, pip_size, weights, settings, m15_df=None,
                 s for s in find_signals(
                     ctx, weights, pip_size,
                     htf_threshold=settings.get("htf_threshold"),
+                    allowed_sessions=settings.get("allowed_sessions"),
                 )
                 if s["entry_time"] < year_end
             ]

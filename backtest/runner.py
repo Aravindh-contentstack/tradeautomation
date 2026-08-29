@@ -199,6 +199,7 @@ def run_year(df, year, *, pip_size, frozen_weights, settings,
         s for s in find_signals(
             ctx, frozen_weights, pip_size,
             htf_threshold=settings.get("htf_threshold"),
+            allowed_sessions=settings.get("allowed_sessions"),
         )
         if s["entry_time"] < end
     ]

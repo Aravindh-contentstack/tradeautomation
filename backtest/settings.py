@@ -63,6 +63,12 @@ DEFAULT_SETTINGS = {
     "tp_multiple": 2.5,
     "max_sl_size_pips": None,
     "sl_buffer_pips": SL_BUFFER_PIPS,
+    # None means "no restriction", same convention as the thresholds above.
+    # allowed_sessions is a list like ["london", "ny"]; restricted_entry_models
+    # is a list of model codes (e.g. "LC-1") EXCLUDED from is_taken, not a
+    # restrict-to allowlist.
+    "allowed_sessions": None,
+    "restricted_entry_models": None,
 }
 
 
@@ -170,6 +176,10 @@ def is_taken(signal, settings, pip_size):
             score = signal["probability"]
         if not score >= threshold:
             return False
+
+    restricted_entry_models = settings.get("restricted_entry_models")
+    if restricted_entry_models and signal.get("entry_model") in restricted_entry_models:
+        return False
 
     return True
 

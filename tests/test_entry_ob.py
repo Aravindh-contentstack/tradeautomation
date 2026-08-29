@@ -74,6 +74,25 @@ class TestM15KillzoneGate:
             False, True, True, False
         ]
 
+    def test_allowed_sessions_none_allows_both_unchanged(self):
+        bundle = m15_at([7, 12])
+        assert [
+            _in_killzone(bundle, j, allowed_sessions=None) for j in range(2)
+        ] == [True, True]
+
+    def test_allowed_sessions_can_restrict_to_london_only(self):
+        bundle = m15_at([7, 12])
+        assert [
+            _in_killzone(bundle, j, allowed_sessions=["london"])
+            for j in range(2)
+        ] == [True, False]
+
+    def test_allowed_sessions_can_restrict_to_ny_only(self):
+        bundle = m15_at([7, 12])
+        assert [
+            _in_killzone(bundle, j, allowed_sessions=["ny"]) for j in range(2)
+        ] == [False, True]
+
 
 class TestProbabilityNormalisation:
     def test_a_full_factor_set_reproduces_the_old_formula(self):
