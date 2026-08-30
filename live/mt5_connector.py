@@ -92,6 +92,13 @@ def fetch_closed_candles(symbol, granularity_key, count):
     is guaranteed fully closed.
     """
     timeframe = TIMEFRAMES[granularity_key]
+    # copy_rates_from_pos silently fails for a symbol Market Watch hasn't
+    # activated yet (e.g. a cross pair MT5 hasn't seen this terminal session) -
+    # select it first, same guard symbol_trade_spec already applies before
+    # placing an order.
+    info = mt5.symbol_info(symbol)
+    if info is not None and not info.visible:
+        mt5.symbol_select(symbol, True)
     rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)
     if rates is None or len(rates) == 0:
         raise RuntimeError(
