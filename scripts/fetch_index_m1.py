@@ -48,7 +48,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 sys.path.insert(0, ".")
-from data.dukascopy_client import INDEX_KEYS, fetch_candles
+from data.dukascopy_client import INDEX_KEYS, INSTRUMENTS, fetch_candles
 
 RAW_DIR = "data/raw"
 GRANULARITY = "M1"
@@ -187,16 +187,24 @@ def main():
                         help="parallel worker processes, split by instrument "
                              "(default 3)")
     parser.add_argument("--instrument", default=None,
-                        help="pull a single instrument instead of all 10")
+                        help="pull a single instrument instead of all 10; "
+                             "accepts any key in INSTRUMENTS, not just the "
+                             "ten in INDEX_KEYS")
     args = parser.parse_args()
 
     os.makedirs(RAW_DIR, exist_ok=True)
     end = datetime.now(timezone.utc)
 
     if args.instrument:
-        if args.instrument not in INDEX_KEYS:
-            print(f"Unknown index key {args.instrument!r}; "
-                  f"expected one of {', '.join(INDEX_KEYS)}")
+        # Validated against INSTRUMENTS rather than INDEX_KEYS: the pull
+        # itself is instrument-agnostic, and restricting the single-instrument
+        # escape hatch to the ten indices only forced one-off pulls (NAS100)
+        # to either edit INDEX_KEYS -- which would wrongly hand them the
+        # indices' 2015 INSTRUMENT_START and their widened validate_m15.py
+        # ratio band -- or copy this script.
+        if args.instrument not in INSTRUMENTS:
+            print(f"Unknown instrument {args.instrument!r}; "
+                  f"expected one of {', '.join(INSTRUMENTS)}")
             return 2
         keys = [args.instrument]
     else:
