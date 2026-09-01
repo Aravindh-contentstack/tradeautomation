@@ -151,7 +151,7 @@ section{margin-bottom:20px}
   <button class="reset" id="toggle-master" type="button">View master sheet</button>
 </header>
 
-<div class="panel">
+<div class="panel" id="pair-panel">
   <div class="pgrid">
     <div class="pcol">
       <div class="eyebrow">Re-simulated <em>&mdash; each value is its own backtest</em></div>
@@ -214,7 +214,7 @@ section{margin-bottom:20px}
 
 <div class="tiles" id="tiles"></div>
 
-<div class="charts">
+<div class="charts" id="pair-charts">
   <div class="card">
     <div class="chead"><h2>Equity curve</h2><span class="eyebrow">cumulative R, by exit</span></div>
     <div class="chartbox"><svg id="eq" viewBox="0 0 560 210" role="img"
@@ -240,7 +240,37 @@ section{margin-bottom:20px}
   <div class="chead" style="margin-bottom:10px">
     <h2>Master sheet</h2><span class="eyebrow" id="mcount"></span>
   </div>
+  <div class="panel" id="mfilters" style="display:none">
+    <div class="pgrid">
+      <div class="pcol">
+        <div class="field">
+          <div class="flabel"><span>Instrument</span></div>
+          <div class="seg" id="mseg-pair" role="group" aria-label="Filter by instrument"></div>
+        </div>
+      </div>
+      <div class="pcol">
+        <div class="field">
+          <div class="flabel"><span>Exit</span></div>
+          <div class="seg" id="mseg-exit" role="group" aria-label="Filter by exit"></div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="tiles" id="master-tiles"></div>
+  <div class="charts" id="master-charts">
+    <div class="card">
+      <div class="chead"><h2>Equity curve</h2><span class="eyebrow">cumulative R, by exit</span></div>
+      <div class="chartbox"><svg id="meq" viewBox="0 0 560 210" role="img"
+        aria-label="Cumulative R over time for the master sheet."></svg>
+        <div class="tip" id="meqtip"></div></div>
+    </div>
+    <div class="card">
+      <div class="chead"><h2>By year</h2><span class="eyebrow">total R</span></div>
+      <div class="chartbox"><svg id="myr" viewBox="0 0 360 210" role="img"
+        aria-label="Total R for each year in the master sheet."></svg>
+        <div class="tip" id="myrtip"></div></div>
+    </div>
+  </div>
   <div class="tscroll" id="mastertablebox"></div>
 </section>
 
@@ -598,6 +628,10 @@ function persistMaster(){
   catch(e) {}
 }
 let masterViewActive = false;
+const EXIT_KINDS = [["tp","TP"],["sl","SL"],["other","Other"]];
+// pairs/exits start empty and get filled in as data appears (see renderMaster),
+// so every pair/exit kind defaults to shown the first time it's seen.
+const masterFilter = { pairs: new Set(), knownPairs: new Set(), exits: new Set(EXIT_KINDS.map(x=>x[0])) };
 
 const $ = id => document.getElementById(id);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -662,8 +696,8 @@ function tiles(m, targetId){
   ).join("");
 }
 
-function equity(m){
-  const svg=$("eq"), tip=$("eqtip"); svg.textContent="";
+function equity(m, svgId, tipId, y0, y1){
+  const svg=$(svgId), tip=$(tipId); svg.textContent="";
   const W=560,H=210,P={t:12,r:14,b:22,l:40};
   if(!m.curve.length){ return; }
   const xs=m.curve.map(p=>p.t);
@@ -686,8 +720,8 @@ function equity(m){
   svg.appendChild(el("path",{d,fill:"none",stroke:css("--line"),"stroke-width":2,
     "stroke-linejoin":"round","stroke-linecap":"round"}));
 
-  const yearsSpan = S.y1-S.y0;
-  for(let yr=S.y0; yr<=S.y1; yr+=(yearsSpan>6?2:1)){
+  const yearsSpan = y1-y0;
+  for(let yr=y0; yr<=y1; yr+=(yearsSpan>6?2:1)){
     const p=m.curve.find(c=>new Date(c.t*60000).getUTCFullYear()>=yr);
     if(!p) continue;
     const t=el("text",{x:X(p.t),y:H-P.b+14,"text-anchor":"middle",class:"axlab"});
@@ -707,17 +741,18 @@ function equity(m){
     dot.setAttribute("cx",X(best.t)); dot.setAttribute("cy",Y(best.eq));
     dot.setAttribute("opacity",1);
     tip.style.opacity=1;
-    tip.textContent = best.x.r[2] + "\n" + fmtR(best.x.outcome) + "  ->  " + fmtR(best.eq);
+    const label = best.x.p ? (NICE(best.x.p) + " · " + best.x.r[2]) : best.x.r[2];
+    tip.textContent = label + "\n" + fmtR(best.x.outcome) + "  ->  " + fmtR(best.eq);
     tip.style.left = Math.min(b.width-120, Math.max(0, X(best.t)/W*b.width-55))+"px";
     tip.style.top = (Y(best.eq)/H*b.height-52)+"px";
   };
   svg.onpointerleave = () => { dot.setAttribute("opacity",0); tip.style.opacity=0; };
 }
 
-function yearChart(t){
-  const svg=$("yr"), tip=$("yrtip"); svg.textContent="";
+function yearChart(t, svgId, tipId, y0, y1){
+  const svg=$(svgId), tip=$(tipId); svg.textContent="";
   const W=360,H=210,P={t:12,r:10,b:24,l:36};
-  const years=[]; for(let y=S.y0;y<=S.y1;y++) years.push(y);
+  const years=[]; for(let y=y0;y<=y1;y++) years.push(y);
   const totals=years.map(y => t.filter(x=>x.r[1]===y).reduce((a,x)=>a+x.outcome,0));
   const counts=years.map(y => t.filter(x=>x.r[1]===y).length);
   let hi=Math.max(1,...totals), lo=Math.min(0,...totals);
@@ -784,20 +819,71 @@ function table(t){
   box.innerHTML = `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function exitKind(reason){
+  const rk = ALL.reasons[reason] || "?";
+  return rk==="tp" ? "tp" : (rk==="sl" ? "sl" : "other");
+}
+
+function masterSegment(host, values, label, isOn, onPick){
+  host.innerHTML = "";
+  values.forEach(v => {
+    const b=document.createElement("button");
+    b.type="button"; b.textContent=label(v);
+    b.setAttribute("aria-pressed", isOn(v));
+    b.onclick = () => { onPick(v); renderMaster(); };
+    host.appendChild(b);
+  });
+}
+
 function renderMaster(){
   const box = $("mastertablebox");
   const pairsWithData = PAIRS.filter(p => MASTER[p] && MASTER[p].trades.length);
-  const allRows = pairsWithData.flatMap(p =>
-    MASTER[p].trades.map(x => Object.assign({p}, x)));
-  $("mcount").textContent = allRows.length + (allRows.length===1?" trade":" trades")
-    + " across " + pairsWithData.length + (pairsWithData.length===1?" pair":" pairs");
-  if(!allRows.length){
+  // A pair/exit kind defaults to shown the first time it's seen, without
+  // re-enabling one the user has since filtered off.
+  pairsWithData.forEach(p => {
+    if(!masterFilter.knownPairs.has(p)){ masterFilter.knownPairs.add(p); masterFilter.pairs.add(p); }
+  });
+
+  if(!pairsWithData.length){
+    $("mfilters").style.display = "none";
     $("master-tiles").innerHTML = "";
+    $("mcount").textContent = "";
     box.innerHTML = '<div class="empty">Nothing saved yet. Tune a pair\'s settings, then click '
       + '&ldquo;Save to master sheet&rdquo;.</div>';
     return;
   }
-  tiles(metrics(allRows), "master-tiles");
+  $("mfilters").style.display = "";
+  masterSegment($("mseg-pair"), pairsWithData, p=>NICE(p), p=>masterFilter.pairs.has(p), p=>{
+    masterFilter.pairs.has(p) ? masterFilter.pairs.delete(p) : masterFilter.pairs.add(p);
+    if(!masterFilter.pairs.size) masterFilter.pairs.add(p);
+  });
+  masterSegment($("mseg-exit"), EXIT_KINDS.map(x=>x[0]), k=>EXIT_KINDS.find(x=>x[0]===k)[1],
+    k=>masterFilter.exits.has(k), k=>{
+    masterFilter.exits.has(k) ? masterFilter.exits.delete(k) : masterFilter.exits.add(k);
+    if(!masterFilter.exits.size) masterFilter.exits.add(k);
+  });
+
+  const allRows = pairsWithData
+    .filter(p => masterFilter.pairs.has(p))
+    .flatMap(p => MASTER[p].trades.map(x => Object.assign({p}, x)))
+    .filter(x => masterFilter.exits.has(exitKind(x.reason)))
+    .sort((a,b) => a.r[19]-b.r[19]);   // chronological, by exit time (same field the equity curve sorts on)
+
+  const shownPairs = pairsWithData.filter(p => masterFilter.pairs.has(p)).length;
+  $("mcount").textContent = allRows.length + (allRows.length===1?" trade":" trades")
+    + " across " + shownPairs + (shownPairs===1?" pair":" pairs");
+  if(!allRows.length){
+    $("master-tiles").innerHTML = "";
+    $("meq").textContent = ""; $("myr").textContent = "";
+    box.innerHTML = '<div class="empty">No trades match these filters.</div>';
+    return;
+  }
+  const years = allRows.map(x=>x.r[1]);
+  const minYear = Math.min(...years), maxYear = Math.max(...years);
+  const mm = metrics(allRows);
+  tiles(mm, "master-tiles");
+  equity(mm, "meq", "meqtip", minYear, maxYear);
+  yearChart(allRows, "myr", "myrtip", minYear, maxYear);
   const head = ["Instrument","Date","Day","Start","End","End date","Duration",
                 "Session","HTF","Trade","Final","SL pips","Exit","Outcome"];
   const rows = allRows.map(({p,r,outcome,reason})=>
@@ -815,7 +901,7 @@ function render(){
   $("v-tp").textContent  = S.tp.toFixed(2) + "R";
   $("v-htf").textContent = "≥ " + S.htf + "%";
   const t = compute(), m = metrics(t);
-  tiles(m); equity(m); yearChart(t); table(t);
+  tiles(m); equity(m, "eq", "eqtip", S.y0, S.y1); yearChart(t, "yr", "yrtip", S.y0, S.y1); table(t);
 }
 
 /* ---- wiring ---- */
@@ -871,7 +957,7 @@ $("save-master").onclick = () => {
 $("toggle-master").onclick = () => {
   masterViewActive = !masterViewActive;
   $("toggle-master").textContent = masterViewActive ? "Back to settings" : "View master sheet";
-  document.querySelectorAll(".panel, #tiles, .charts, #pair-trades-section")
+  document.querySelectorAll("#pair-panel, #tiles, #pair-charts, #pair-trades-section")
     .forEach(e => { e.style.display = masterViewActive ? "none" : ""; });
   $("master-section").style.display = masterViewActive ? "" : "none";
   if(masterViewActive) renderMaster();
