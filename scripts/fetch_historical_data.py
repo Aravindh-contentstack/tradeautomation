@@ -4,11 +4,16 @@ resume-on-crash.
 Two things drive the shape of this script:
 
 1. The download plan is explicit, not a cross-product. Daily/H4/H1 are pulled
-   for all 11 instruments, but M15 only for the 10 instruments in
-   backtest/instruments.py. NAS100 is a point-based index CFD rather than a
-   pip-quoted pair and the backtest does not support it, so pulling ~620k M15
+   for all 39 keys in data.dukascopy_client.INSTRUMENTS (27 FX pairs, XAU_USD,
+   NAS100 and the 10 world equity indices), while M15 is pulled for the 38
+   keys in backtest/instruments.py PIP_SIZES, which is everything except
+   NAS100. NAS100 is a point-based index CFD that no data was pulled for under
+   the index plan and the backtest does not support it, so pulling ~620k M15
    rows for it would be dead weight. PIP_SIZES is imported rather than
    re-listed so that instrument list has exactly one definition in the repo.
+
+   M1 is deliberately NOT in this plan. It is downloaded by
+   scripts/fetch_index_m1.py, and adding it here would download it twice.
 
 2. Every 180-day chunk is checkpointed to disk. The M15 pull is roughly 47
    chunks per instrument; before this, one exhausted retry at chunk 46 threw
@@ -36,11 +41,17 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 sys.path.insert(0, ".")
-from data.dukascopy_client import INSTRUMENTS, fetch_candles
+from data.dukascopy_client import INDEX_KEYS, INSTRUMENTS, fetch_candles
 from backtest.instruments import PIP_SIZES
 
 RAW_DIR = "data/raw"
 EARLIEST_START = datetime(2003, 1, 1, tzinfo=timezone.utc)
+
+# The equity indices have no usable history before 2015 on this feed, so
+# starting them at 2003 would just burn ~24 empty chunks per instrument.
+INDEX_START = datetime(2015, 1, 1, tzinfo=timezone.utc)
+INSTRUMENT_START = {key: INDEX_START for key in INDEX_KEYS}
+
 CHUNK_DAYS = 180
 
 # Dukascopy's public feed occasionally 5xx's or stalls under a long sequential
@@ -111,7 +122,7 @@ def fetch_one(instrument_key, granularity_key, end):
         start = combined["date"].max() + timedelta(seconds=1)
     else:
         combined = pd.DataFrame(columns=EMPTY_COLUMNS)
-        start = EARLIEST_START
+        start = INSTRUMENT_START.get(instrument_key, EARLIEST_START)
 
     cursor = start
     while cursor < end:

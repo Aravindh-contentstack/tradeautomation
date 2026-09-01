@@ -7,9 +7,16 @@ not crash anything, it would just quietly flip the verdict on the ambiguous
 trades, which are the trades the whole plan is about. So this script checks
 the properties that would catch that, in increasing order of strength:
 
- 10. len(M15)/len(H1) between 3.8 and 4.05, measured over BACKTEST_START
-     onward (2020-01-01), not the full file. Catches a truncated or partial
-     pull in the window that is actually used.
+ 10. len(M15)/len(H1) inside an instrument-shaped band, measured over
+     BACKTEST_START onward (2020-01-01), not the full file. Catches a
+     truncated or partial pull in the window that is actually used.
+
+     The band is 3.8 to 4.05 for the 24/5 FX pairs and 3.60 to 4.05 for the
+     equity indices. The lower index floor is not a concession on data
+     quality: an index CFD has intraday session boundaries, the hour holding
+     a boundary legitimately contains fewer than 4 M15 bars, and every such
+     hour pulls the ratio under 4. See INDEX_MIN_RATIO for the measured
+     per-index numbers and where the partial hours sit.
 
      Measuring over the full file history gave two false failures on the
      real data. First, Dukascopy's own M15 history starts in 2007 for 9 of
@@ -60,11 +67,37 @@ import pandas as pd
 
 sys.path.insert(0, ".")
 from backtest.instruments import PIP_SIZES
+from data.dukascopy_client import INDEX_KEYS
 
 RAW_DIR = "data/raw"
 
 MIN_RATIO = 3.8
 MAX_RATIO = 4.05
+
+# The equity indices need a lower floor, and NOT because their data is worse.
+# An FX pair trades one continuous block from Sunday to Friday, so almost every
+# H1 hour contains exactly 4 M15 bars and the ratio pins to 4.000. An index CFD
+# has intraday session boundaries (a cash open, a cash close, a lunch break),
+# and the hour containing a boundary legitimately holds 1, 2 or 3 M15 bars while
+# still being one H1 bar. Every such hour drags the ratio below 4.
+#
+# Measured from 2020 onward on the real data, with the count of H1 hours holding
+# fewer than 4 M15 bars, and where they sit:
+#   HSIHKD  3.732   4887 partial hours at 01, 08 and 09 UTC (open + HK lunch)
+#   ASXAUD  3.764   3517 partial hours at 22, 23, 05 and 06 UTC (open + close)
+#   SP500   3.870   1715 partial hours at 20 and 21 UTC (US cash close)
+#   JPN225  3.873 / US30 3.870 / DAX40 3.883 / UK100 3.897
+#   IBXEUR, ESXEUR, F40EUR  3.998  (part-day, but no mid-session break)
+# Each cluster is roughly one hour per trading day per boundary, which is what
+# a session edge looks like and is not what a truncated pull looks like.
+#
+# 3.60 clears the worst observed (HSIHKD) with headroom while staying far above
+# what a real defect produces: a truncated or partial pull lands in the 2.x
+# range or lower, and a misalignment shows up in checks 11 and 12 rather than
+# here. The FX floor is deliberately left at 3.8 -- this is a separate bound for
+# a differently-shaped instrument, not a loosening of the existing one.
+INDEX_MIN_RATIO = 3.60
+
 EXPECTED_MINUTES = {0, 15, 30, 45}
 GAP_HOURS = 4
 MAX_GAPS_PRINTED = 10
@@ -96,11 +129,24 @@ def load(instrument, granularity):
     return pd.read_parquet(path)
 
 
-def check_ratio(m15, h1):
+def min_ratio_for(instrument):
+    """The lower bound on the M15:H1 ratio, which is instrument-shaped.
+
+    Indices get INDEX_MIN_RATIO because their session boundaries produce H1
+    hours holding fewer than 4 M15 bars; see that constant for the measured
+    numbers. FX keeps the original 3.8.
+    """
+    return INDEX_MIN_RATIO if instrument in INDEX_KEYS else MIN_RATIO
+
+
+def check_ratio(m15, h1, instrument):
     """Check 10: from BACKTEST_START onward, M15 should be very close to 4x
     the H1 row count. That is the only window this project ever reads, so
     it is the only window this check holds to a hard standard; see the
     module docstring for the two genuine pre-2020 feed gaps this sidesteps.
+
+    The floor is per instrument (see min_ratio_for): an index legitimately
+    sits below 4 because of its intraday session boundaries.
     """
     if len(h1) == 0:
         return False, "H1 file is empty"
@@ -111,11 +157,13 @@ def check_ratio(m15, h1):
         return False, f"H1 has no rows on or after {BACKTEST_START.date()}"
 
     ratio = len(m15_recent) / len(h1_recent)
-    ok = MIN_RATIO <= ratio <= MAX_RATIO
+    floor = min_ratio_for(instrument)
+    ok = floor <= ratio <= MAX_RATIO
 
     full_ratio = len(m15) / len(h1)
     return ok, (
-        f"ratio {ratio:.3f} from {BACKTEST_START.date()} onward "
+        f"ratio {ratio:.3f} (band {floor}-{MAX_RATIO}) "
+        f"from {BACKTEST_START.date()} onward "
         f"(M15 {len(m15_recent)}, H1 {len(h1_recent)}); "
         f"full-history ratio {full_ratio:.3f} "
         f"(M15 starts {m15['date'].min().date()}, H1 starts {h1['date'].min().date()})"
@@ -132,15 +180,33 @@ def check_minutes(m15):
 def pick_sample_year(m15, h1, requested):
     """Pick a year present in both series, defaulting to the latest complete one.
 
-    'Complete' here just means it has a plausible number of H1 bars (>4000,
-    versus roughly 6200 in a full year), which excludes the partial current
-    year and any partial first year.
+    'Complete' means the year has a plausible number of H1 bars, which excludes
+    the partial current year and any partial first year.
+
+    The bar for "plausible" cannot be a fixed 4000. A 24/5 FX pair prints
+    roughly 6200 H1 bars a year, but a part-day index prints far fewer purely
+    because it trades fewer hours a day: IBXEUR tops out at 3084 bars in its
+    best year, ESXEUR 3612, F40EUR 3597, HSIHKD 3676. Against a flat 4000 every
+    year of those instruments looks incomplete, no year qualifies, and check 12
+    -- the decisive one -- silently degrades into "no usable sample year"
+    instead of actually comparing anything.
+
+    So the threshold is taken relative to the instrument's OWN busiest year,
+    capped at the original 4000. min() rather than a bare fraction is what
+    keeps FX behaviour bit-identical: for a pair whose best year is ~6200,
+    0.8 * 6200 is 4960, the cap wins, and the test stays "> 4000" exactly as
+    before. Only instruments whose own maximum is already under 4000 see a
+    lower bar, and for them it is still 80% of what that instrument achieves
+    in a full year, so a genuinely truncated year is still excluded.
     """
     if requested is not None:
         return requested
     m15_years = set(m15["date"].dt.year.unique())
     counts = h1.groupby(h1["date"].dt.year).size()
-    usable = [y for y, n in counts.items() if n > 4000 and y in m15_years]
+    if counts.empty:
+        return None
+    threshold = min(4000, 0.8 * counts.max())
+    usable = [y for y, n in counts.items() if n > threshold and y in m15_years]
     return max(usable) if usable else None
 
 
@@ -228,7 +294,7 @@ def validate_instrument(instrument, requested_year):
 
     results = []
 
-    ok, detail = check_ratio(m15, h1)
+    ok, detail = check_ratio(m15, h1, instrument)
     results.append(ok)
     print(f"  [{'PASS' if ok else 'FAIL'}] row-count ratio     {detail}")
 
@@ -266,7 +332,8 @@ def main():
     parser.add_argument("--year", type=int, default=None,
                         help="sample year for the resample cross-check")
     parser.add_argument("--instrument", default=None,
-                        help="validate a single instrument instead of all 10")
+                        help="validate a single instrument instead of every "
+                             "instrument in PIP_SIZES")
     args = parser.parse_args()
 
     instruments = [args.instrument] if args.instrument else list(PIP_SIZES)

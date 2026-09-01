@@ -162,3 +162,79 @@ as the nearest valid target.
 **Open before building:** the bound itself, and whether it is measured in
 bars, in ATR-relative distance, or against the size of the leg that
 produced the zone.
+
+## Take the indices live (noted 2026-08-31)
+
+The 10 world equity indices (SP500, UK100, JPN225, US30, DAX40, IBXEUR,
+ESXEUR, ASXAUD, HSIHKD, F40EUR) are backtest-only. Nothing was added to
+`live/pairs.py`, and no index reaches MT5. Taking them live means adding them
+to the live pair list, giving each one broker settings, and letting the M15
+pending-order runner place real orders on them.
+
+Deferred because going live needs three things this work does not touch. First,
+a proven per-index settings set, which is its own deferred entry below. Second,
+broker-side MT5 symbol names that match what the prop firm actually offers: the
+MT5 symbol for the S&P is not "SP500", and every index needs its real symbol
+confirmed against the live terminal before an order can be sent. Third,
+confirmation that index CFD contract sizes work through `live/risk.py`'s lot
+sizing, which today assumes an FX pip value and would size an index position
+wrongly (possibly by orders of magnitude) if handed a point-quoted instrument.
+
+**Open before building:** the MT5 symbol mapping per index, whether index
+positions share the FX risk budget or get a separate budget of their own,
+whether the part-day indices (IBXEUR, ESXEUR, F40EUR, and HSIHKD) need a
+session guard so the runner does not place pending orders into a closed
+market, and the fact that `magic_for()` derives each pair's magic number from
+its position in `PAIRS`, so indices must be APPENDED to that list and never
+inserted, or every currently live pair's magic number shifts and its open
+positions are orphaned.
+
+## Per-index settings tuning (noted 2026-08-31)
+
+Every FX pair has a walk-forward-tuned settings file per year under
+`data/settings/<KEY>/`. The 10 indices have none. Until the same search runs
+for them they cannot be backtested meaningfully, because the engine would be
+reading either defaults or nothing rather than settings fitted to the
+instrument.
+
+Deferred because it depends on the data this work produces (the indices were
+only just downloaded) and because it is a substantial compute job in its own
+right, on the same scale as the original per-pair search rather than a small
+follow-up.
+
+**Open before building:** whether the existing per-pair search in
+`scripts/apply_pair_settings.py` transfers unchanged to a point-quoted
+instrument or needs point-aware handling of anything pip-shaped, whether 2015
+to 2019 should be used as extra tuning history now that these instruments have
+it (the FX walk-forward starts at 2020, so this would be a deliberate
+divergence between the two families), and what to do about IBXEUR, ESXEUR and
+F40EUR, which trade roughly 06:00 to 19:00 UTC and therefore produce no Asian
+range at all. For them part of the factor space is structurally unavailable
+rather than merely rare, so the search is fitting over a smaller space than it
+is for FX.
+
+## M3 as an entry timeframe (noted 2026-08-31)
+
+M3 is being collected as data only. Nothing in the engine reads it. The
+engine's base timeline is H1, with M15 used for intrabar resolution and for
+the M15 entry models (LC-1, LC-2A, LC-2B, CE). Promoting M3 to an entry
+timeframe means letting structure, liquidity or fills be resolved at
+3-minute resolution.
+
+Deferred because wiring a third intraday timeframe into the entry layer is
+much larger than adding a data file. `backtest/intrabar.py`'s docstring spells
+out why: its indices are YEAR-SCOPED, since `runner.run_year` hands
+`build_market_context` an `m15_df` already windowed to the walk period, while
+the entry models need full history or liquidity formed in December would be
+invisible to January. That is why `backtest/m15_pipeline.py` builds its own
+full-history bundle and maps between the two spaces by TIMESTAMP rather than
+by reusing an index, and why the docstring warns "This class is NOT the entry
+layer's seam, and must not become it." Adding M3 adds a third index space, and
+therefore a third chance to misaddress every level silently, with no error
+raised when it goes wrong.
+
+**Open before building:** whether M3 replaces M15 as the intrabar resolver or
+sits below it as a third tier, whether M3 structure detection is wanted at all
+or M3 is purely for resolving ambiguous bars, and how the killzone windows and
+the 19:00 London deadline logic behave at 3-minute resolution, since both were
+written against coarser bars.

@@ -46,7 +46,53 @@ INSTRUMENTS = {
     "NZD_CHF": instruments.INSTRUMENT_FX_CROSSES_NZD_CHF,
     "CAD_JPY": instruments.INSTRUMENT_FX_CROSSES_CAD_JPY,
     "CHF_JPY": instruments.INSTRUMENT_FX_CROSSES_CHF_JPY,
+    # World equity indices, added 2026-08-31. These are POINT-quoted CFDs, not
+    # pip-quoted pairs, so backtest/instruments.py gives them a PIP_SIZES of
+    # 1.0 (one index point). That works because analysis.py's
+    # _max_sl_size_pips_grid derives its grid from quantiles of the observed
+    # data rather than from a fixed pip scale, so the 20x spread in price
+    # scale across these (a median H1 range of ~12 points on ESXEUR vs ~268 on
+    # JPN225) sizes itself.
+    #
+    # Dukascopy only carries these from 2015, which is why
+    # scripts/fetch_historical_data.py needs a per-instrument start date
+    # rather than the global 2003 EARLIEST_START.
+    #
+    # TRADING HOURS ARE NOT 24/5 for all of them, and that has one real
+    # consequence. IBXEUR, ESXEUR and F40EUR trade roughly 06:00-19:00 UTC and
+    # so have NO bars at all during the Asian range (midnight-04:00 London);
+    # HSIHKD covers it only partially. smc/liquidity/time_levels.py already
+    # skips a session with no bars rather than emitting a null range, so those
+    # three simply produce no Asian-range liquidity level. That is the
+    # intended behaviour -- an absent level, never an invented one. Both
+    # killzones (London 07-10, NY 12-15 London civil) ARE covered by all ten.
+    "SP500": instruments.INSTRUMENT_IDX_AMERICA_E_SANDP_500,
+    "UK100": instruments.INSTRUMENT_IDX_EUROPE_E_FUTSEE_100,
+    "JPN225": instruments.INSTRUMENT_IDX_ASIA_E_N225JAP,
+    "US30": instruments.INSTRUMENT_IDX_AMERICA_E_D_J_IND,
+    "DAX40": instruments.INSTRUMENT_IDX_EUROPE_E_DAAX,
+    "IBXEUR": instruments.INSTRUMENT_IDX_EUROPE_E_IBC_MAC,
+    "ESXEUR": instruments.INSTRUMENT_IDX_EUROPE_E_DJE50XX,
+    "ASXAUD": instruments.INSTRUMENT_IDX_ASIA_E_XJO_ASX,
+    "HSIHKD": instruments.INSTRUMENT_IDX_ASIA_E_H_KONG,
+    "F40EUR": instruments.INSTRUMENT_IDX_EUROPE_E_CAAC_40,
 }
+
+# The equity-index block above, as its own list. fetch_historical_data.py uses
+# it to give the indices a 2015 start date, and scripts/fetch_index_m1.py uses
+# it to know which instruments to pull M1 for.
+INDEX_KEYS = [
+    "SP500",
+    "UK100",
+    "JPN225",
+    "US30",
+    "DAX40",
+    "IBXEUR",
+    "ESXEUR",
+    "ASXAUD",
+    "HSIHKD",
+    "F40EUR",
+]
 
 # Maps this project's own granularity keys to dukascopy_python's interval
 # constants. Daily/H4/H1 are fetched directly, never resampled: swing_structure/
@@ -58,11 +104,18 @@ INSTRUMENTS = {
 # INTERVAL_MIN_15 (not INTERVAL_M15) -- getting this wrong silently yields a
 # different interval rather than raising, which is why scripts/validate_m15.py
 # asserts the minute set is exactly {0, 15, 30, 45}.
+#
+# M1 was added 2026-08-31 for the equity indices only, and only as the raw
+# material for M3: Dukascopy has no 3-minute interval (the minute intervals it
+# offers are 1, 5, 10, 15 and 30), so scripts/build_index_m3.py resamples M1
+# up to M3. M3 is deliberately NOT a key here, because this dict maps to real
+# dukascopy_python interval constants and M3 is not one of them.
 GRANULARITIES = {
     "D": dp.INTERVAL_DAY_1,
     "H4": dp.INTERVAL_HOUR_4,
     "H1": dp.INTERVAL_HOUR_1,
     "M15": dp.INTERVAL_MIN_15,
+    "M1": dp.INTERVAL_MIN_1,
 }
 
 
