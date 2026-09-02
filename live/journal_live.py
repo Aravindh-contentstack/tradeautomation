@@ -4,6 +4,21 @@ backtest simulates (see backtest/simulate.py) - a breakeven-moved flag,
 the next 19:00 London checkpoint due, and the trade's Friday deadline -
 so management survives a bot restart instead of forgetting where each
 open trade stood.
+
+A row is written the moment an order is SENT, not when it fills, so
+`status` has three values, not two:
+
+    open       resting at the broker, or filled and being managed
+    closed     the position is gone and its result is recorded
+    cancelled  the order was removed before it ever filled
+
+"cancelled" matters because live/pending_plan.py is cancel-and-replace by
+design: an order that re-hosts to a new candle is cancelled and a fresh
+row written, so MOST rows here never become trades. Without a way to say
+so, those rows would stay "open" forever - polluting any read of what was
+actually traded, and leaving run_live.py's management loops re-checking
+orders that stopped existing weeks ago. See mark_cancelled() for the one
+narrow condition under which it is safe to write.
 """
 
 import os
@@ -144,6 +159,38 @@ def mark_pending_exit(instrument, year, ticket, reason):
     if not mask.any():
         return False
     df.loc[mask, "pending_exit_reason"] = reason
+    df.to_csv(path, index=False)
+    return True
+
+
+def mark_cancelled(instrument, year, ticket):
+    """Records that a pending order was removed WITHOUT ever filling.
+
+    Only ever call this having directly observed both halves of that
+    claim - that the order was resting, and that removing it succeeded.
+    Do not infer it from a ticket's absence.
+
+    The reason is that one integer serves as order ticket, position
+    ticket and position id throughout run_live.py, so "no longer a
+    resting order" is equally true of an order that FILLED. Writing
+    "cancelled" onto a filled order would drop it out of open_trades()
+    and strand a real position with no 19:00 checkpoint and no Friday
+    close - the worst outcome available in this file. run_live.py's
+    reconcile_pending_orders is the only caller for exactly that reason:
+    it holds the pending_order_exists() and cancel_pending_order()
+    results together, which no other code path does.
+
+    Returns False when the ticket isn't in this year's journal, which is
+    the normal answer for the year that didn't hold the order - callers
+    sweep both years rather than tracking which one applies.
+    """
+    path = journal_path(instrument, year)
+    df = _load(path)
+    mask = df["ticket"] == ticket
+    if not mask.any():
+        return False
+    df.loc[mask, "status"] = "cancelled"
+    df.loc[mask, "exit_reason"] = "cancelled"
     df.to_csv(path, index=False)
     return True
 

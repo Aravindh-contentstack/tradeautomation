@@ -96,6 +96,61 @@ def plan_pending(signals, resting, pip_size,
     return keep, cancel, wanted
 
 
+def rank_candidates(candidates, occupied, cap, max_per_instrument):
+    """Decides which of this sweep's candidates may actually be placed,
+    against the account's shared concurrency caps.
+
+    candidates: this sweep's would-be orders, each a dict with "signal"
+        (carrying "total_probability"), "instrument", and "is_rehost" -
+        the shape run_live.py's run_once() returns.
+    occupied: {instrument: trades already open or resting}, read from the
+        broker AFTER this sweep's cancellations have gone through.
+    cap: the account-wide ceiling (safety.MAX_CONCURRENT_TRADES).
+    max_per_instrument: the per-instrument ceiling
+        (safety.MAX_TRADES_PER_INSTRUMENT).
+
+    Two ceilings, not one. The account-wide cap exists because N trades
+    at 1% risk is N% of the account at once; the per-instrument cap
+    exists because filling every slot from ONE symbol is a single
+    directional bet wearing the costume of a diversified book, which is
+    exactly what the account-wide cap was meant to prevent.
+
+    Re-hosts go first, ahead of higher-scoring newcomers. A re-hosting
+    order already HELD a slot at the start of the sweep and only vacated
+    it because plan_pending replaces rather than modifies (see this
+    module's docstring). Making it re-win that slot in open competition
+    would let a newcomer evict a live setup, leaving the pair with
+    nothing resting - strictly worse than before the sweep began, and
+    repeatable every candle while the book is full. The backtest assumes
+    a re-host always succeeds, so this keeps live behaviour matched to
+    it. Within each group the order is by total_probability, highest
+    first, ties keeping input order (Python's sort is stable), which is
+    the caller's instrument order rather than anything randomized.
+
+    Returns (winners, losers), each a list in the same shape as
+    `candidates` - the caller places winners and alerts on losers.
+    """
+    by_probability = lambda c: c["signal"]["total_probability"]
+    rehosts = sorted([c for c in candidates if c.get("is_rehost")],
+                     key=by_probability, reverse=True)
+    newcomers = sorted([c for c in candidates if not c.get("is_rehost")],
+                       key=by_probability, reverse=True)
+
+    per_instrument = dict(occupied)
+    total = sum(per_instrument.values())
+
+    winners, losers = [], []
+    for candidate in rehosts + newcomers:
+        instrument = candidate["instrument"]
+        if total >= cap or per_instrument.get(instrument, 0) >= max_per_instrument:
+            losers.append(candidate)
+            continue
+        winners.append(candidate)
+        per_instrument[instrument] = per_instrument.get(instrument, 0) + 1
+        total += 1
+    return winners, losers
+
+
 def _as_ob_row(key):
     """State keys come back from JSON as strings; ob_row is an int."""
     try:

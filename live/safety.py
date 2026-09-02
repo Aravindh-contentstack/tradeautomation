@@ -21,6 +21,36 @@ from datetime import datetime, timedelta, timezone
 DAILY_RESET_HOUR_UTC = 0  # VERIFY against your prop firm's actual daily reset time.
 MAX_DAILY_LOSS_PCT = 0.02  # VERIFY this sits below your prop firm's real daily loss limit.
 
+# A second, ACCOUNT-WIDE ceiling, checked once per sweep across every pair
+# combined rather than per magic number. MAX_DAILY_LOSS_PCT alone caps each
+# pair's own loss at 2%, but does nothing to stop several correlated pairs
+# (e.g. several JPY crosses) from stopping out the same day and adding up to
+# far more than that on the account as a whole. This matters more now that
+# RISK_PER_TRADE is 1% instead of 0.2% - five pairs losing on the same day is
+# 5% down with nothing to stop it otherwise. VERIFY this sits below your prop
+# firm's real daily loss limit, same as MAX_DAILY_LOSS_PCT.
+MAX_ACCOUNT_DAILY_LOSS_PCT = 0.03
+
+# The prop firm's real max daily loss is 5%. At 1% risked per trade, 5
+# simultaneous trades all hitting stop the same day would exactly consume
+# it - no margin for a trade still open and moving against the account when
+# the breaker below (which reacts to REALIZED plus floating loss, not to
+# trade COUNT) finally catches up. Capping at 4 rather than 5, per user
+# decision (2026-09-02), leaves that margin. Counts open positions AND
+# resting pending orders together, since a resting order becomes a real
+# position - and real risk - the instant price reaches it, with the bot
+# never consulted in between.
+MAX_CONCURRENT_TRADES = 4
+
+# ...and no more than this many of those slots from any ONE instrument.
+# Without it, the cap above is satisfied by four trades on the same
+# symbol, which is one directional bet at 4% risk rather than the
+# diversified book the cap was written to protect - the same correlation
+# argument MAX_ACCOUNT_DAILY_LOSS_PCT is built on. live/pending_plan.py's
+# one_per_zone already limits one signal per order block, but a single
+# instrument can produce several order blocks in one sweep.
+MAX_TRADES_PER_INSTRUMENT = 1
+
 
 def pause_file(instrument):
     return os.path.join("live", "PAUSE_%s" % instrument)
@@ -83,18 +113,21 @@ def roll_daily_state(state, current_balance):
     return state
 
 
-def daily_loss_breached(state, pair_pnl_today):
-    """Breached when THIS pair's own today P&L (realized + floating,
-    scoped to its own magic number) is down more than MAX_DAILY_LOSS_PCT
-    of the account's day-start balance - not the account's overall
-    balance change, so one pair losing money doesn't trip the breaker
-    for the other 9 pairs sharing the same account.
+def daily_loss_breached(state, pair_pnl_today, threshold=MAX_DAILY_LOSS_PCT):
+    """Breached when today's P&L (realized + floating) is down more than
+    `threshold` of the account's day-start balance.
+
+    Called two ways: per-pair, with pnl scoped to one magic number and
+    threshold=MAX_DAILY_LOSS_PCT, so one pair losing money doesn't trip the
+    breaker for the others sharing the account; and once per sweep with pnl
+    summed across every pair and threshold=MAX_ACCOUNT_DAILY_LOSS_PCT, to
+    catch several pairs losing together on the same day.
     """
     day_start = state.get("day_start_balance")
     if not day_start:
         return False
     loss_pct = -pair_pnl_today / day_start
-    return loss_pct >= MAX_DAILY_LOSS_PCT
+    return loss_pct >= threshold
 
 
 def is_new_candle(state, candle_time):

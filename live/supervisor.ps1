@@ -31,6 +31,21 @@ function Start-Bot {
     # second list duplicated here.
     $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
     Write-Output "$(Get-Date): starting live/run_live.py (all pairs) (log: bot_$stamp.log)"
+
+    # Nothing ever deleted these before - every restart (crash, git-triggered,
+    # or manual) minted a fresh pair of files and left them forever, which is
+    # what filled the VPS disk. Keep only the newest 10 of each before adding
+    # one more. "bot_*.log" alone would also match "bot_..._....err.log" (the
+    # * covers ".err" too), so the .err.log files are excluded explicitly -
+    # otherwise the two Remove-Item passes below would rank a mixed pool of
+    # both file types instead of 10 of each kind.
+    Get-ChildItem -Path $LogDir -Filter "bot_*.log" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike "*.err.log" } |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $LogDir -Filter "bot_*.err.log" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     # "-u" forces Python's stdout/stderr to be unbuffered. Without it, Python
     # fully buffers output whenever it's not talking to a real console (e.g.
     # redirected to a file here), so print() calls sit invisible in a buffer

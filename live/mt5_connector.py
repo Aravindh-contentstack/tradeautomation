@@ -273,6 +273,85 @@ def floating_profit(magic):
     return sum(p.profit for p in positions if p.magic == magic)
 
 
+def open_and_pending_by_magic(magics):
+    """{magic: open positions + resting pending orders}, for the shared
+    MAX_CONCURRENT_TRADES / MAX_TRADES_PER_INSTRUMENT caps.
+
+    Counts positions and resting orders TOGETHER because a resting order
+    becomes a position, and real risk, the instant price reaches it -
+    with the bot never consulted in between. Counting only what has
+    already filled would let the cap be exceeded by orders that were
+    always going to fill.
+
+    RAISES rather than returning zeros when the terminal can't be read.
+    positions_get()/orders_get() return None on failure, which is
+    indistinguishable from "nothing open" - and of the two possible wrong
+    answers here, "no trades are open" is catastrophic where an exception
+    is merely a skipped cycle: it would free every slot in the cap and
+    let a full extra book of trades on top of the existing one. Every
+    other reader in this module fails the same way for the same reason.
+
+    `magics` must be every magic the bot owns (live/pairs.py's whole
+    list), not just the instruments a given process happens to be
+    running: an order left resting by a pair this process isn't sweeping
+    is still this bot's order and still consumes real account risk. It is
+    passed in rather than read from live/pairs.py here only so a manual
+    trade placed by hand under some other magic never counts against the
+    bot's own cap.
+    """
+    magics = set(magics)
+    positions = mt5.positions_get()
+    if positions is None:
+        raise RuntimeError("positions_get() failed: %s" % (mt5.last_error(),))
+    orders = mt5.orders_get()
+    if orders is None:
+        raise RuntimeError("orders_get() failed: %s" % (mt5.last_error(),))
+
+    counts = {magic: 0 for magic in magics}
+    for position in positions:
+        if position.magic in counts:
+            counts[position.magic] += 1
+    for order in orders:
+        if order.magic in counts:
+            counts[order.magic] += 1
+    return counts
+
+
+def pnl_by_magic(since_utc):
+    """{magic: today's realized + floating P&L}, in account currency.
+
+    One positions_get() and one history_deals_get() for the whole sweep,
+    rather than the two calls per instrument the per-magic helpers below
+    would cost. That matters because the daily-loss breakers are checked
+    on EVERY poll (a breaker that only fires on M15 boundaries would let
+    a breached pair keep full-size orders resting for another 15
+    minutes), so at 27 instruments the per-pair version was 54 broker
+    round-trips every 15 seconds.
+
+    Includes every magic present, the bot's own and any manual trade, so
+    summing the values gives the account-wide figure the prop firm
+    actually measures. Callers pick out one magic for the per-pair check.
+
+    Raises rather than under-reporting for the same reason as
+    open_and_pending_by_magic: a P&L silently read as zero is a breaker
+    that never trips.
+    """
+    pnl = {}
+    positions = mt5.positions_get()
+    if positions is None:
+        raise RuntimeError("positions_get() failed: %s" % (mt5.last_error(),))
+    for position in positions:
+        pnl[position.magic] = pnl.get(position.magic, 0.0) + position.profit
+
+    deals = mt5.history_deals_get(since_utc, datetime.now(timezone.utc))
+    if deals is None:
+        raise RuntimeError("history_deals_get() failed: %s" % (mt5.last_error(),))
+    for deal in deals:
+        if deal.entry == mt5.DEAL_ENTRY_OUT:
+            pnl[deal.magic] = pnl.get(deal.magic, 0.0) + deal.profit
+    return pnl
+
+
 def today_realized_profit(magic, since_utc):
     """Sum of profit from this magic number's deals that closed a
     position (DEAL_ENTRY_OUT) since `since_utc` - the realized half of a
