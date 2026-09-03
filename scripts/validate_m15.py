@@ -129,14 +129,22 @@ def load(instrument, granularity):
     return pd.read_parquet(path)
 
 
+# NAS100 is an index CFD with the same session boundaries as INDEX_KEYS, but
+# it is not in that set and must not be added to it: scripts/fetch_index_m1.py
+# iterates INDEX_KEYS and would start a multi-hour M1 pull that nothing reads.
+# The M1/M3 membership question and the ratio-band question are two different
+# questions, so they get two different sets.
+SESSION_GAPPED = set(INDEX_KEYS) | {"NAS100"}
+
+
 def min_ratio_for(instrument):
     """The lower bound on the M15:H1 ratio, which is instrument-shaped.
 
     Indices get INDEX_MIN_RATIO because their session boundaries produce H1
     hours holding fewer than 4 M15 bars; see that constant for the measured
-    numbers. FX keeps the original 3.8.
+    numbers. FX and the spot metals keep the original 3.8.
     """
-    return INDEX_MIN_RATIO if instrument in INDEX_KEYS else MIN_RATIO
+    return INDEX_MIN_RATIO if instrument in SESSION_GAPPED else MIN_RATIO
 
 
 def check_ratio(m15, h1, instrument):

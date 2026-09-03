@@ -595,6 +595,58 @@ const COPY = {
   },
 };
 
+// Copy for any instrument COPY does not name, built from that
+// instrument's own numbers.
+//
+// Two reasons this is generated rather than hand-written. The counts are
+// carried in the data by the build, so they cannot drift out of step with
+// the book the way a transcribed number can. And the wording defaults to
+// the honest one: a new instrument has to be given a tuned-settings claim
+// deliberately, by adding it to COPY above, rather than inheriting one by
+// being pasted from the wrong neighbour.
+function defaultCopy(pair){
+  const d = ALL.instruments[pair], nice = NICE(pair);
+  const counts = (d && d.n_candidates)
+    ? d.n_candidates + " candidate trades · " + d.n_after_ob
+      + " after one-trade-per-order-block"
+    : "";
+  // A point-quoted index CFD, where "pip" means one index point. The
+  // buffer grid and the R figures still work, but they are on that
+  // instrument's own scale and do not line up with an FX pair's.
+  const points = d && d.pip_size >= 1;
+  // An instrument whose data starts after the first year on the slider. The
+  // year filter still offers those early years, so say plainly that they are
+  // empty for want of data. Otherwise a short book reads as a long book that
+  // simply found nothing to trade, which is the opposite conclusion.
+  const late = d && d.data_start && d.data_start > d.years[0] ? d.data_start : 0;
+  return {
+    meta: counts,
+    sub: "Every combination below was simulated on real " + nice + " history. Change a "
+       + "setting and the trades, the equity curve and the numbers all recompute against "
+       + "the same book.",
+    banner: "<b>No tuned settings yet — this is the raw book.</b> Nothing here has been "
+       + "optimised, and none of the other instruments' settings carry over: this one was "
+       + "backtested completely independently and has its own scale. The controls open at a "
+       + "neutral starting point, not a recommendation. Whatever you settle on is fitted to "
+       + "history the moment you pick it, so a wider year range and a healthier trade count "
+       + "are the two things most worth watching."
+       + (points
+          ? " <b>This is an index, priced in points, not pips.</b> The buffer is index "
+            + "points here, so a &ldquo;2 pip&rdquo; buffer is a completely different size of "
+            + "move than it is on a currency pair. Read this instrument on its own, and do "
+            + "not carry a setting across from an FX pair."
+          : "")
+       + (late
+          ? " <b>This book starts in " + late + ", not " + d.years[0] + ".</b> There is no "
+            + "price data before then, so the earlier years on the slider are empty for want "
+            + "of history, not because the strategy sat them out. Judge it on "
+            + (d.years[d.years.length - 1] - late + 1) + " years, not eleven."
+          : ""),
+  };
+}
+
+const copyFor = pair => COPY[pair] || defaultCopy(pair);
+
 // Opening position for each pair. Deliberately the same loose starting
 // point on both: the tightest useful settings are what the user is here to
 // find, and pre-loading an answer would prejudge that.
@@ -893,9 +945,9 @@ function renderMaster(){
 
 function render(){
   $("hd-meta").textContent = NICE(PAIR) + " · " + D.years[0] + "–" + D.years[D.years.length-1]
-    + " · " + (COPY[PAIR] ? COPY[PAIR].meta : "");
-  $("hd-sub").textContent = COPY[PAIR] ? COPY[PAIR].sub : "";
-  $("hd-banner").innerHTML = COPY[PAIR] ? COPY[PAIR].banner : "";
+    + " · " + copyFor(PAIR).meta;
+  $("hd-sub").textContent = copyFor(PAIR).sub;
+  $("hd-banner").innerHTML = copyFor(PAIR).banner;
   $("v-buf").textContent = S.buffer + (S.buffer===1?" pip":" pips");
   $("v-str").textContent = "≥ " + S.strength + "%";
   $("v-tp").textContent  = S.tp.toFixed(2) + "R";
