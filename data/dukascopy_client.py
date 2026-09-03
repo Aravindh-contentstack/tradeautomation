@@ -120,11 +120,17 @@ INDEX_KEYS = [
 # offers are 1, 5, 10, 15 and 30), so scripts/build_index_m3.py resamples M1
 # up to M3. M3 is deliberately NOT a key here, because this dict maps to real
 # dukascopy_python interval constants and M3 is not one of them.
+#
+# M5 was added 2026-09-03, also data-only, pulled by scripts/fetch_m5.py for
+# every key in INSTRUMENTS. Unlike M1 it maps to a real Dukascopy interval and
+# needs no resampling; it is a genuine intraday tier that just was not needed
+# until now. Its history on this feed starts in 2012, same as M1.
 GRANULARITIES = {
     "D": dp.INTERVAL_DAY_1,
     "H4": dp.INTERVAL_HOUR_4,
     "H1": dp.INTERVAL_HOUR_1,
     "M15": dp.INTERVAL_MIN_15,
+    "M5": dp.INTERVAL_MIN_5,
     "M1": dp.INTERVAL_MIN_1,
 }
 
