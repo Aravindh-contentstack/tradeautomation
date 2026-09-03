@@ -27,6 +27,16 @@ INSTRUMENTS = {
     "EUR_JPY": instruments.INSTRUMENT_FX_CROSSES_EUR_JPY,
     "XAU_USD": instruments.INSTRUMENT_FX_METALS_XAU_USD,
     "NAS100": instruments.INSTRUMENT_IDX_AMERICA_E_NQ_100,
+    # Extra metals, data-only (not wired into PIP_SIZES/PAIRS). Added
+    # 2026-09-03 and pulled by scripts/fetch_metals.py for D/H4/H1/M15/M1.
+    # XAG_USD is a spot FX-metal like XAU_USD; the other three are Dukascopy
+    # commodity CFDs (XPD.CMD/USD, XPT.CMD/USD, COPPER.CMD/USD) -- palladium,
+    # platinum and copper. Copper is what other brokers ticker as CUCUSD.
+    # Dukascopy has NO EUR-quoted metals, so XAGEUR / XAUEUR are unavailable.
+    "XAG_USD": instruments.INSTRUMENT_FX_METALS_XAG_USD,
+    "XPD_USD": instruments.INSTRUMENT_CMD_METALS_XPD_CMD_USD,
+    "XPT_USD": instruments.INSTRUMENT_CMD_METALS_XPT_CMD_USD,
+    "COPPER_USD": instruments.INSTRUMENT_CMD_METALS_COPPER_CMD_USD,
     # Liquid FX crosses, data-only for now (not wired into PIP_SIZES/PAIRS).
     "EUR_GBP": instruments.INSTRUMENT_FX_CROSSES_EUR_GBP,
     "EUR_CHF": instruments.INSTRUMENT_FX_CROSSES_EUR_CHF,
