@@ -1,0 +1,44 @@
+{
+  "applied": {
+    "htf_threshold": 50.0,
+    "total_threshold": 55.0,
+    "threshold": 55.0,
+    "tp_multiple": 2.0,
+    "max_sl_size_pips": null,
+    "sl_buffer_pips": 0.5,
+    "allowed_sessions": [
+      "london"
+    ],
+    "restricted_entry_models": [
+      "LC-1"
+    ]
+  },
+  "recommended": {
+    "htf_threshold": 50.0,
+    "total_threshold": 55.0,
+    "threshold": 55.0,
+    "tp_multiple": 2.0,
+    "max_sl_size_pips": null,
+    "sl_buffer_pips": 0.5,
+    "allowed_sessions": [
+      "london"
+    ],
+    "restricted_entry_models": [
+      "LC-1"
+    ]
+  },
+  "candidate_count": 14,
+  "taken_count": 8,
+  "source": "manual",
+  "note": "Chosen by hand by the user in a review of backtest data on 2026-09-04 (per-pair-trade-setttings.csv), extending the 2026-08-29 rollout to the 11 indices and 5 metals that the settings explorer previously carried as raw-book-only, not tuned, not on the live path. Factor weights are all 1.0 (no learning). Stats are over 2015-2025, in-sample by construction since the settings were picked while looking at that period. Written as a 2026 file so the live runner, which reads the newest year, picks these up. Produced by scripts/apply_pair_settings.py.",
+  "backtest_2015_2025": {
+    "trades": 8,
+    "tp_hits": 3,
+    "sl_hits": 3,
+    "other": 2,
+    "strike_rate": 0.5,
+    "total_r": 3.0,
+    "r_per_trade": 0.375,
+    "max_drawdown_r": 2.0
+  }
+}

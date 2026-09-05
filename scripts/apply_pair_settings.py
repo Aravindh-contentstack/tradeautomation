@@ -52,12 +52,50 @@ WEIGHTS_DIR = "data/weights"
 # backtest data anywhere in this repo. Confirmed with the user: it was
 # meant to be CHF_JPY (present in the settings-explorer tool's own
 # instrument list, unlike CAD_CHF).
-NAME_FIX = {"CAD CHF": "CHF_JPY"}
+#
+# The 2026-09-04 addition of the 16 indices/metals rows uses broker
+# tickers for the five metals (XAUUSD, XAGUSD, XPTUSD, XPDUSD, CUCUSD),
+# which don't match this repo's data/pip-size keys (XAU_USD, XAG_USD,
+# XPT_USD, XPD_USD, COPPER_USD - see backtest/instruments.py and the
+# data/raw/*_M15.parquet filenames). The 11 index rows (SP500, US30,
+# UK100, DAX40, JPN225, ASXAUD, HSIHKD, IBXEUR, ESXEUR, F40EUR, NAS100)
+# already match their repo keys exactly, no fix needed.
+NAME_FIX = {
+    "CAD CHF": "CHF_JPY",
+    "XAUUSD": "XAU_USD",
+    "XAGUSD": "XAG_USD",
+    "XPTUSD": "XPT_USD",
+    "XPDUSD": "XPD_USD",
+    "CUCUSD": "COPPER_USD",
+}
 
 NOTE = (
     "Chosen by hand by the user in a review of backtest data across all "
     "27 pairs on 2026-08-29 (per-pair-trade-setttings.csv), aiming for a "
     "combined strike rate above 60% and max drawdown of 4.1%. Factor "
+    "weights are all 1.0 (no learning). Stats are over 2015-2025, "
+    "in-sample by construction since the settings were picked while "
+    "looking at that period. Written as a 2026 file so the live runner, "
+    "which reads the newest year, picks these up. Produced by "
+    "scripts/apply_pair_settings.py."
+)
+
+# The 11 indices + 5 metals added to per-pair-trade-setttings.csv on
+# 2026-09-04, moving them off the settings-explorer's raw-book-only list
+# (see the 2026-09-03 "Add the 11 indices and 5 metals to the settings
+# explorer" commit, which explicitly kept them off the live path) and
+# onto live/pairs.py for the first time.
+NEW_2026_09_04 = {
+    "SP500", "US30", "UK100", "DAX40", "JPN225", "ASXAUD", "HSIHKD",
+    "IBXEUR", "ESXEUR", "F40EUR", "NAS100",
+    "XAU_USD", "XAG_USD", "XPT_USD", "XPD_USD", "COPPER_USD",
+}
+
+NOTE_2026_09_04 = (
+    "Chosen by hand by the user in a review of backtest data on 2026-09-04 "
+    "(per-pair-trade-setttings.csv), extending the 2026-08-29 rollout to "
+    "the 11 indices and 5 metals that the settings explorer previously "
+    "carried as raw-book-only, not tuned, not on the live path. Factor "
     "weights are all 1.0 (no learning). Stats are over 2015-2025, "
     "in-sample by construction since the settings were picked while "
     "looking at that period. Written as a 2026 file so the live runner, "
@@ -78,7 +116,7 @@ def parse_restricted(raw):
     raw = raw.strip()
     if not raw or raw == "None":
         return None
-    return [raw]
+    return [s.strip() for s in raw.split(",")]
 
 
 def load_rows():
@@ -146,7 +184,7 @@ def main():
         # add them the same way the earlier hand-picked files carry them.
         path = os.path.join(SETTINGS_DIR, instrument, "%s_settings_2026.json" % instrument)
         payload["source"] = "manual"
-        payload["note"] = NOTE
+        payload["note"] = NOTE_2026_09_04 if instrument in NEW_2026_09_04 else NOTE
         payload["backtest_2015_2025"] = {
             "trades": s["trade_count"],
             "tp_hits": s["tp_hits"],

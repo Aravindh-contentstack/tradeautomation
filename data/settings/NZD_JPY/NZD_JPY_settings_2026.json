@@ -26,7 +26,7 @@
   "candidate_count": 4,
   "taken_count": 4,
   "source": "manual",
-  "note": "Chosen by hand by the user in a review of backtest data across all 27 pairs on 2026-08-29 (per-pair-trade-setttings.csv), aiming for a combined strike rate above 60% and max drawdown of 4.1%. Factor weights are all 1.0 (no learning). Stats are over 2015-2025, in-sample by construction since the settings were picked while looking at that period. Written as a 2026 file so the live runner, which reads the newest year, picks these up. The CSV's last row (\"CAD CHF\") does not exist anywhere in this repo; confirmed with the user it meant CHF_JPY, which is what this file is for. Produced by scripts/apply_pair_settings.py.",
+  "note": "Chosen by hand by the user in a review of backtest data across all 27 pairs on 2026-08-29 (per-pair-trade-setttings.csv), aiming for a combined strike rate above 60% and max drawdown of 4.1%. Factor weights are all 1.0 (no learning). Stats are over 2015-2025, in-sample by construction since the settings were picked while looking at that period. Written as a 2026 file so the live runner, which reads the newest year, picks these up. Produced by scripts/apply_pair_settings.py.",
   "backtest_2015_2025": {
     "trades": 4,
     "tp_hits": 2,

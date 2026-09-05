@@ -36,6 +36,27 @@ PAIRS = [
     "NZD_CHF",
     "CAD_JPY",
     "CHF_JPY",
+    # Appended 2026-09-05 with the indices/metals settings rollout
+    # (per-pair-trade-setttings.csv). These were previously data-only,
+    # raw-book instruments on the settings-explorer with no settings file
+    # and nothing on the live path (see the 2026-09-03 explorer commit).
+    # Same append-only rule as above: never insert, never reorder.
+    "SP500",
+    "US30",
+    "UK100",
+    "DAX40",
+    "JPN225",
+    "ASXAUD",
+    "HSIHKD",
+    "IBXEUR",
+    "ESXEUR",
+    "F40EUR",
+    "XAU_USD",
+    "XAG_USD",
+    "XPT_USD",
+    "XPD_USD",
+    "COPPER_USD",
+    "NAS100",
 ]
 
 MAGIC_BASE = 20260808
