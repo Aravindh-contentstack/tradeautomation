@@ -147,13 +147,22 @@ def load_latest_weights(instrument):
     return load_weights(path)
 
 
+# Every instrument's broker symbol is its name with the underscore stripped
+# (EUR_USD -> EURUSD), except copper: this repo calls it COPPER_USD (the pip
+# size and data files use that key) while the broker lists it as CUCUSD, which
+# is also how it appears in per-pair-trade-setttings.csv. MT5_SYMBOL_SUFFIX
+# still applies on top of whatever this resolves to.
+MT5_SYMBOL_OVERRIDES = {"COPPER_USD": "CUCUSD"}
+
+
 def build_configs(instruments):
     suffix = os.environ.get("MT5_SYMBOL_SUFFIX", "")
     configs = {}
     for instrument in instruments:
         configs[instrument] = {
             "instrument": instrument,
-            "mt5_symbol": instrument.replace("_", "") + suffix,
+            "mt5_symbol": MT5_SYMBOL_OVERRIDES.get(
+                instrument, instrument.replace("_", "")) + suffix,
             "pip_size": pip_size_for(instrument),
             "magic": magic_for(instrument),  # distinct per pair, so many instruments on one account never collide
             "settings": load_latest_settings(instrument),
